@@ -1,0 +1,16 @@
+{
+  "model": "glm-4",
+  "streaming": true,
+  "theme": "dark",
+  "exclude": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "__pycache__"
+  ],
+  "maxFiles": 50,
+  "maxTotalSize": 500000,
+  "autoSaveHistory": true,
+  "maxHistoryMessages": 100
+}

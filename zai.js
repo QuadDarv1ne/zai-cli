@@ -1165,15 +1165,16 @@ async function interactiveMode() {
         process.exit(0);
     });
 
-    console.log(`
+    console.log(chalk.cyan(`
 ╔═══════════════════════════════════════════════════════════╗
 ║              🤖 z.ai CLI - Интерактивный чат              ║
 ║                   Модель: GLM-${currentModel.padEnd(12)}           ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Введите /help для списка команд, /exit для выхода        ║
+║  Введите ${chalk.green('/help')} для списка команд, ${chalk.green('/exit')} для выхода${chalk.cyan('        ║')}
 ║  История автоматически сохраняется между сессиями         ║
+║  ${chalk.green('Streaming:')} ${chalk.yellow(userConfig.streaming !== false ? 'включён' : 'выключен')}                                    ║
 ╚═══════════════════════════════════════════════════════════╝
-`);
+`));
 
     const rl = readline.createInterface({
         input: process.stdin,
@@ -1360,6 +1361,32 @@ async function interactiveMode() {
                     }
                     break;
 
+                case '/config':
+                    console.log(chalk.cyan('\n⚙️ Конфигурация z.ai CLI:\n'));
+                    console.log(chalk.gray('Файл конфигурации: ') + chalk.yellow(CONFIG.CONFIG_FILE));
+                    console.log(chalk.gray('Существует: ') + (fs.existsSync(CONFIG.CONFIG_FILE) ? chalk.green('да') : chalk.red('нет')));
+                    console.log('');
+                    
+                    if (Object.keys(userConfig).length > 0) {
+                        console.log(chalk.gray('Текущие настройки:\n'));
+                        Object.entries(userConfig).forEach(([key, value]) => {
+                            console.log(`  ${chalk.cyan(key)}: ${chalk.yellow(JSON.stringify(value))}`);
+                        });
+                    } else {
+                        console.log(chalk.gray('Используются настройки по умолчанию.\n'));
+                        console.log(chalk.gray('Создайте файл zai.config.json для кастомизации:\n'));
+                        console.log(chalk.green(`  {
+    "model": "glm-4",
+    "streaming": true,
+    "theme": "dark",
+    "exclude": ["node_modules", ".git"],
+    "maxFiles": 50,
+    "autoSaveHistory": true
+  }\n`));
+                    }
+                    console.log('');
+                    break;
+
                 case '/exit':
                 case '/quit':
                 case '/q':
@@ -1386,13 +1413,30 @@ async function interactiveMode() {
         saveChatHistory(conversationHistory);
 
         try {
-            process.stdout.write('🤖 AI > ');
-            const answer = await chat(conversationHistory, currentModel);
-
-            conversationHistory.push({ role: 'assistant', content: answer });
-            saveChatHistory(conversationHistory);
-
-            console.log(highlightSyntax(answer) + '\n');
+            const useStreaming = userConfig.streaming !== false; // По умолчанию true
+            
+            if (useStreaming) {
+                process.stdout.write('🤖 AI > ');
+                let fullAnswer = '';
+                
+                // Используем streaming
+                for await (const chunk of chatStream(conversationHistory, currentModel)) {
+                    fullAnswer += chunk;
+                    process.stdout.write(chalk.green(chunk));
+                }
+                
+                console.log('\n');
+                conversationHistory.push({ role: 'assistant', content: fullAnswer });
+                saveChatHistory(conversationHistory);
+            } else {
+                process.stdout.write('🤖 AI > ');
+                const answer = await chat(conversationHistory, currentModel);
+                
+                conversationHistory.push({ role: 'assistant', content: answer });
+                saveChatHistory(conversationHistory);
+                
+                console.log(highlightSyntax(answer) + '\n');
+            }
         } catch (error) {
             console.error(`\n❌ Ошибка: ${error.message}\n`);
             conversationHistory.pop();
@@ -1415,10 +1459,24 @@ async function interactiveMode() {
 
 async function singleMode(message, model) {
     try {
-        console.log('\n🤖 GLM-' + model + ' печатает...\n');
-        const answer = await chat([{ role: 'user', content: message }], model);
-        console.log(highlightSyntax(answer));
-        console.log('\n');
+        const useStreaming = userConfig.streaming !== false;
+        
+        if (useStreaming) {
+            console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
+            let fullAnswer = '';
+            
+            for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
+                fullAnswer += chunk;
+                process.stdout.write(chalk.green(chunk));
+            }
+            
+            console.log('\n');
+        } else {
+            console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
+            const answer = await chat([{ role: 'user', content: message }], model);
+            console.log(highlightSyntax(answer));
+            console.log('\n');
+        }
     } catch (error) {
         console.error('❌ Ошибка:', error.message);
         process.exit(1);
@@ -1432,6 +1490,7 @@ async function singleMode(message, model) {
 async function main() {
     const flags = {
         help: args.includes('-h') || args.includes('--help'),
+        version: args.includes('-v') || args.includes('--version'),
         create: args.indexOf('--create'),
         init: args.indexOf('--init'),
         project: args.indexOf('--project'),
@@ -1439,10 +1498,16 @@ async function main() {
         analyze: args.indexOf('--analyze'),
         explain: args.indexOf('--explain'),
         test: args.indexOf('--test'),
-        doc: args.indexOf('--doc'),
-        fix: args.indexOf('--fix'),
-        security: args.indexOf('--security')
+        doc: args.indexOf('--doc')
     };
+
+    if (flags.version) {
+        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+        console.log(chalk.cyan(`\n🤖 z.ai CLI v${pkg.version}`));
+        console.log(chalk.gray(`   Node.js ${process.version}`));
+        console.log(chalk.gray(`   Модель по умолчанию: ${userConfig.model || 'glm-4'}\n`));
+        return;
+    }
 
     if (flags.help) {
         printHelp();
