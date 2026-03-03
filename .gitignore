@@ -5,7 +5,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Переменные окружения (КРИТИЧНО: содержит API ключи)
-!.env
+.env
 .env.*
 .env.local
 .env.*.local
