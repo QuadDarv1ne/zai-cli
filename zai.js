@@ -3,6 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const chalk = require('chalk');
+const { SingleBar } = require('cli-progress');
 
 // ═══════════════════════════════════════════════════════════════════════
 // КОНФИГУРАЦИЯ
@@ -12,6 +14,7 @@ const CONFIG = {
     API_URL: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     API_KEY_FILE: path.join(__dirname, '.env'),
     HISTORY_FILE: path.join(__dirname, '.chat-history.json'),
+    CONFIG_FILE: path.join(__dirname, 'zai.config.json'),
     TIMEOUT: 60000,           // 60 секунд таймаут
     MAX_RETRIES: 3,           // Максимум попыток
     RETRY_DELAY: 1000,        // Задержка между попытками (мс)
@@ -39,23 +42,41 @@ loadEnv();
 const API_KEY = process.env.ZAI_API_KEY;
 
 // ═══════════════════════════════════════════════════════════════════════
+// ЗАГРУЗКА КОНФИГУРАЦИИ
+// ═══════════════════════════════════════════════════════════════════════
+
+let userConfig = {};
+
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG.CONFIG_FILE)) {
+            userConfig = JSON.parse(fs.readFileSync(CONFIG.CONFIG_FILE, 'utf8'));
+        }
+    } catch (e) {
+        // Игнорируем ошибки
+    }
+}
+
+loadConfig();
+
+// ═══════════════════════════════════════════════════════════════════════
 // ВАЛИДАЦИЯ API КЛЮЧА
 // ═══════════════════════════════════════════════════════════════════════
 
 function validateApiKey() {
     if (!API_KEY) {
-        console.error('\n❌ Ошибка: API ключ не найден!');
-        console.error('\n📝 Решение:');
-        console.error('   1. Откройте файл .env');
-        console.error('   2. Добавьте: ZAI_API_KEY=ваш_ключ');
-        console.error('   3. Или установите переменную окружения\n');
+        console.error(chalk.red('\n❌ Ошибка: API ключ не найден!'));
+        console.error(chalk.yellow('\n📝 Решение:'));
+        console.error(chalk.gray('   1. Откройте файл .env'));
+        console.error(chalk.gray('   2. Добавьте: ZAI_API_KEY=ваш_ключ'));
+        console.error(chalk.gray('   3. Или установите переменную окружения\n'));
         process.exit(1);
     }
 
     // Проверка формата ключа (должен содержать точку)
     if (!API_KEY.includes('.') || API_KEY.length < 20) {
-        console.error('\n❌ Ошибка: Неверный формат API ключа!');
-        console.error('   Ключ должен выглядеть как: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxx\n');
+        console.error(chalk.red('\n❌ Ошибка: Неверный формат API ключа!'));
+        console.error(chalk.gray('   Ключ должен выглядеть как: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxx\n'));
         process.exit(1);
     }
 
@@ -144,72 +165,48 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ПОДСВЕТКА СИНТАКСИСА (простая реализация)
+// ПОДСВЕТКА СИНТАКСИСА (с использованием chalk)
 // ═══════════════════════════════════════════════════════════════════════
-
-const SYNTAX_COLORS = {
-    keyword: '\x1b[35m',      // фиолетовый
-    string: '\x1b[32m',       // зелёный
-    number: '\x1b[33m',       // жёлтый
-    comment: '\x1b[90m',      // серый
-    function: '\x1b[36m',     // голубой
-    operator: '\x1b[33m',     // жёлтый
-    bracket: '\x1b[90m',      // серый
-    reset: '\x1b[0m'
-};
 
 function highlightSyntax(code, lang = '') {
     if (!process.stdout.isTTY) return code; // Не красим если не терминал
 
     let highlighted = code;
 
-    // Ключевые слова (универсальные)
-    const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|typeof|instanceof|def|print|import|as|with|except|raise|lambda|yield|global|nonlocal|pass|break|continue|in|is|and|or|not|null|undefined|true|false|None|True|False)\b/g;
-    highlighted = highlighted.replace(keywords, `${SYNTAX_COLORS.keyword}$1${SYNTAX_COLORS.reset}`);
+    // Ключевые слова
+    const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|typeof|instanceof|def|print|with|except|raise|lambda|yield|global|nonlocal|pass|break|continue|in|is|and|or|not|null|undefined|true|false|None|True|False)\b/g;
+    highlighted = highlighted.replace(keywords, chalk.magenta('$1'));
 
     // Строки
-    highlighted = highlighted.replace(/(["'`])(?:(?!\1)[^\\]|\\.)*?\1/g, `${SYNTAX_COLORS.string}$&${SYNTAX_COLORS.reset}`);
+    highlighted = highlighted.replace(/(["'`])(?:(?!\1)[\\].)*?\1/g, chalk.green('$&'));
 
     // Числа
-    highlighted = highlighted.replace(/\b\d+(\.\d+)?\b/g, `${SYNTAX_COLORS.number}$&${SYNTAX_COLORS.reset}`);
+    highlighted = highlighted.replace(/\b\d+(\.\d+)?\b/g, chalk.yellow('$&'));
 
     // Комментарии
-    highlighted = highlighted.replace(/(\/\/.*$|#.*$)/gm, `${SYNTAX_COLORS.comment}$1${SYNTAX_COLORS.reset}`);
+    highlighted = highlighted.replace(/(\/\/.*$|#.*$)/gm, chalk.gray('$1'));
 
     // Функции
-    highlighted = highlighted.replace(/\b([a-zA-Z_]\w*)(?=\s*\()/g, `${SYNTAX_COLORS.function}$1${SYNTAX_COLORS.reset}`);
+    highlighted = highlighted.replace(/\b([a-zA-Z_]\w*)(?=\s*\()/g, chalk.cyan('$1'));
 
     return highlighted;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ПРОГРЕСС БАР
+// ПРОГРЕСС БАР (с использованием cli-progress)
 // ═══════════════════════════════════════════════════════════════════════
 
 function createProgressBar(total) {
-    let current = 0;
-    const barWidth = 30;
-
+    const bar = new SingleBar({
+        format: chalk.cyan('📊 [') + chalk.green('{bar}') + chalk.cyan(']') + ' {percentage}% | {value}/{total}',
+        barCompleteChar: '█',
+        barIncompleteChar: '░',
+        hideCursor: true
+    });
+    bar.start(total, 0);
     return {
-        update: (increment = 1) => {
-            current += increment;
-            const progress = Math.min(current / total, 1);
-            const filled = Math.round(barWidth * progress);
-            const empty = barWidth - filled;
-            const percent = Math.round(progress * 100);
-
-            const bar = '█'.repeat(filled) + '░'.repeat(empty);
-            process.stdout.write(`\r📊 [${bar}] ${percent}% (${current}/${total})`);
-
-            if (current >= total) {
-                process.stdout.write('\n');
-            }
-        },
-        done: () => {
-            current = total;
-            const bar = '█'.repeat(barWidth);
-            process.stdout.write(`\r📊 [${bar}] 100% (${total}/${total})\n`);
-        }
+        update: (increment = 1) => bar.increment(increment),
+        done: () => bar.stop()
     };
 }
 
@@ -252,7 +249,7 @@ let currentModel = 'glm-4';
 // ═══════════════════════════════════════════════════════════════════════
 
 function printHelp() {
-    console.log(`
+    console.log(chalk.cyan(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                    z.ai CLI - Справка                     ║
 ╠═══════════════════════════════════════════════════════════╣
@@ -281,7 +278,11 @@ function printHelp() {
 ║    /history               → Показать историю              ║
 ║    /save <file>           → Сохранить историю             ║
 ║    /load <file>           → Загрузить историю             ║
+║    ` + chalk.green.bold(`/export <file> [fmt]   → Экспорт в MD/HTML/TXT`) + chalk.cyan('     ║') + `
+║    ` + chalk.green.bold(`/config                → Показать настройки`) + chalk.cyan('            ║') + `
 ║    /exit, /quit, /q       → Выход                         ║
+║                                                           ║
+║  ` + chalk.yellow('НОВОЕ:') + chalk.cyan(' Streaming режим для мгновенного вывода ответов') + `
 ║                                                           ║
 ║  ПРИМЕРЫ:                                                 ║
 ║    node zai.js --create "Создай Telegram бота на Python"  ║
@@ -291,15 +292,15 @@ function printHelp() {
 ║    node zai.js --analyze ./src                            ║
 ║    node zai.js --explain main.py                          ║
 ╚═══════════════════════════════════════════════════════════╝
-`);
+`));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // CHAT ФУНКЦИЯ С РЕТРАЯМИ
 // ═══════════════════════════════════════════════════════════════════════
 
-async function chat(messages, model = 'glm-4', systemPrompt = null) {
-    const allMessages = systemPrompt 
+async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = false) {
+    const allMessages = systemPrompt
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
 
@@ -311,14 +312,78 @@ async function chat(messages, model = 'glm-4', systemPrompt = null) {
         },
         body: JSON.stringify({
             model: model,
-            messages: allMessages
+            messages: allMessages,
+            stream: streaming
         })
     };
 
     const response = await fetchWithRetry(CONFIG.API_URL, options);
-    const data = await response.json();
     
+    if (streaming) {
+        return response; // Возвращаем response для streaming
+    }
+    
+    const data = await response.json();
     return data.choices[0].message.content;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STREAMING ФУНКЦИЯ (потоковая передача ответов)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
+    const allMessages = systemPrompt
+        ? [{ role: 'system', content: systemPrompt }, ...messages]
+        : messages;
+
+    const options = {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: allMessages,
+            stream: true
+        })
+    };
+
+    const response = await fetchWithRetry(CONFIG.API_URL, options);
+    
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+                const data = trimmed.slice(6);
+                if (data === '[DONE]') continue;
+                try {
+                    const parsed = JSON.parse(data);
+                    const content = parsed.choices?.[0]?.delta?.content || '';
+                    if (content) {
+                        yield content;
+                    }
+                } catch (e) {
+                    // Пропускаем некорректные данные
+                }
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -979,6 +1044,112 @@ async function createDocs(filePath) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// РЕЖИМ: FIX (АВТО-ИСПРАВЛЕНИЕ БАГОВ)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function fixFile(filePath) {
+    console.log('\n🔧 Исправление багов...\n');
+
+    try {
+        const file = getFileContent(filePath);
+        console.log(`📄 Файл: ${file.path}\n`);
+
+        const systemPrompt = `Ты опытный разработчик, находишь и исправляешь баги в коде.
+Проанализируй код и найди:
+- Логические ошибки
+- Потенциальные баги
+- Проблемы с обработкой ошибок
+- Уязвимости безопасности
+- Проблемы производительности
+
+Верни исправленный код в формате:
+\`\`\`<язык>
+// FILE: ${file.path}
+<исправленный код>
+\`\`\`
+
+Также кратко опиши что было исправлено.`;
+
+        const response = await chat(
+            [{ role: 'user', content: `Найди и исправь баги в этом коде:\n\n${file.content}` }],
+            currentModel,
+            systemPrompt
+        );
+
+        console.log('\n🤖 Исправления:\n');
+        console.log(highlightSyntax(response));
+
+        const files = extractFilesFromResponse(response, path.dirname(file.path));
+
+        if (files.length > 0) {
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout
+            });
+
+            rl.question('\n💾 Применить исправления? (y/n): ', (answer) => {
+                rl.close();
+
+                if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+                    fs.writeFileSync(files[0].path, files[0].content, 'utf8');
+                    console.log(`\n✅ Файл исправлен: ${files[0].path}\n`);
+                } else {
+                    console.log('\n⏭️ Исправления отменены.\n');
+                }
+            });
+        }
+    } catch (error) {
+        console.error(`❌ Ошибка: ${error.message}\n`);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// РЕЖИМ: SECURITY (АУДИТ БЕЗОПАСНОСТИ)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function securityAudit(targetPath) {
+    console.log('\n🔒 Аудит безопасности...\n');
+
+    const absolutePath = path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath);
+
+    if (!fs.existsSync(absolutePath)) {
+        console.error(`❌ Путь не найден: ${absolutePath}\n`);
+        return;
+    }
+
+    console.log('🔍 Сканирование файлов...\n');
+    const files = fs.statSync(absolutePath).isDirectory()
+        ? readFilesRecursively(absolutePath)
+        : [getFileContent(targetPath)];
+
+    console.log(`📄 Найдено файлов: ${files.length}\n`);
+
+    const systemPrompt = `Ты эксперт по безопасности кода. Проанализируй код на наличие уязвимостей:
+
+1. Инъекции (SQL, XSS, Command Injection)
+2. Проблемы аутентификации и авторизации
+3. Утечки чувствительных данных
+4. Небезопасные зависимости
+5. Конфигурационные ошибки
+6. Проблемы с обработкой входных данных
+
+Код для анализа:
+${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n\n')}
+
+Дай развёрнутый отчёт с уровнем критичности (Critical/High/Medium/Low) для каждой проблемы.`;
+
+    const response = await chat(
+        [{ role: 'user', content: 'Проведи аудит безопасности кода и найди все уязвимости.' }],
+        currentModel,
+        systemPrompt
+    );
+
+    console.log('\n🤖 Отчёт по безопасности:\n');
+    console.log(highlightSyntax(response));
+    console.log('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ИНТЕРАКТИВНЫЙ РЕЖИМ
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -1110,6 +1281,85 @@ async function interactiveMode() {
                     }
                     break;
 
+                case '/export':
+                    if (cmdArgs.length === 0) {
+                        console.log(chalk.yellow('⚠️ Формат: /export <filename> [format]'));
+                        console.log(chalk.gray('   Форматы: md (по умолчанию), html, txt\n'));
+                        console.log(chalk.gray('   Примеры:'));
+                        console.log(chalk.gray('     /export chat.md'));
+                        console.log(chalk.gray('     /export chat.html html'));
+                        console.log(chalk.gray('     /export chat.txt txt\n'));
+                    } else {
+                        const filename = cmdArgs[0];
+                        const format = (cmdArgs[1] || 'md').toLowerCase();
+                        const filepath = path.join(__dirname, filename);
+                        
+                        let content = '';
+                        
+                        if (format === 'md' || format === 'markdown') {
+                            content = '# Диалог с z.ai CLI\n\n';
+                            content += `*Дата экспорта: ${new Date().toLocaleString('ru-RU')}*\n\n`;
+                            content += '---\n\n';
+                            conversationHistory.forEach((msg, i) => {
+                                const role = msg.role === 'user' ? '👤 Вы' : '🤖 AI';
+                                content += `## ${role}\n\n${msg.content}\n\n`;
+                                if (i < conversationHistory.length - 1) {
+                                    content += '---\n\n';
+                                }
+                            });
+                        } else if (format === 'html') {
+                            content = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Диалог с z.ai CLI</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        .message { margin: 20px 0; padding: 15px; border-radius: 8px; }
+        .user { background: #264f78; }
+        .assistant { background: #1e3a5f; }
+        .role { font-weight: bold; margin-bottom: 10px; color: #569cd6; }
+        .content { white-space: pre-wrap; line-height: 1.6; }
+        .timestamp { color: #808080; font-size: 0.9em; }
+        pre { background: #1a1a1a; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        code { font-family: 'Consolas', 'Monaco', monospace; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Диалог с z.ai CLI</h1>
+    <p class="timestamp">Экспортировано: ${new Date().toLocaleString('ru-RU')}</p>
+`;
+                            conversationHistory.forEach((msg) => {
+                                const roleClass = msg.role === 'user' ? 'user' : 'assistant';
+                                const role = msg.role === 'user' ? '👤 Вы' : '🤖 AI';
+                                const escapedContent = msg.content
+                                    .replace(/&/g, '&amp;')
+                                    .replace(/</g, '&lt;')
+                                    .replace(/>/g, '&gt;');
+                                content += `
+    <div class="message ${roleClass}">
+        <div class="role">${role}</div>
+        <div class="content">${escapedContent}</div>
+    </div>
+`;
+                            });
+                            content += `
+</body>
+</html>`;
+                        } else {
+                            // txt формат
+                            content = conversationHistory.map((msg, i) => {
+                                const role = msg.role === 'user' ? 'Вы' : 'AI';
+                                return `[${i + 1}] ${role}: ${msg.content}`;
+                            }).join('\n\n');
+                        }
+                        
+                        fs.writeFileSync(filepath, content, 'utf8');
+                        console.log(chalk.green(`💾 Диалог экспортирован в: ${filepath}\n`));
+                    }
+                    break;
+
                 case '/exit':
                 case '/quit':
                 case '/q':
@@ -1189,7 +1439,9 @@ async function main() {
         analyze: args.indexOf('--analyze'),
         explain: args.indexOf('--explain'),
         test: args.indexOf('--test'),
-        doc: args.indexOf('--doc')
+        doc: args.indexOf('--doc'),
+        fix: args.indexOf('--fix'),
+        security: args.indexOf('--security')
     };
 
     if (flags.help) {
@@ -1274,6 +1526,22 @@ async function main() {
             return;
         }
         await createDocs(filePath);
+        return;
+    }
+
+    if (flags.fix !== -1) {
+        const filePath = args[flags.fix + 1];
+        if (!filePath) {
+            console.error('❌ Укажите файл\n');
+            return;
+        }
+        await fixFile(filePath);
+        return;
+    }
+
+    if (flags.security !== -1) {
+        const targetPath = args[flags.security + 1] || '.';
+        await securityAudit(targetPath);
         return;
     }
 

@@ -7,8 +7,26 @@
     "zai": "./zai.js"
   },
   "scripts": {
-    "start": "node zai.js"
+    "start": "node zai.js",
+    "dev": "node --watch zai.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
-  "keywords": ["zai", "zhipu", "glm", "ai", "cli"],
-  "license": "MIT"
+  "keywords": [
+    "zai",
+    "zhipu",
+    "glm",
+    "ai",
+    "cli"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "cli-progress": "^3.12.0"
+  }
 }
