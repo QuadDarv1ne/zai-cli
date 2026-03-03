@@ -1,0 +1,7 @@
+# Оставляет .env в репозитории, но игнорирует все остальные .env файлы
+!.env
+.env.*
+.env.local
+.env.*.local
+.env.production
+.env.backup

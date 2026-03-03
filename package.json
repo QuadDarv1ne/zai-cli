@@ -1,0 +1,14 @@
+{
+  "name": "zai-cli",
+  "version": "1.0.0",
+  "description": "CLI для работы с z.ai (Zhipu AI / GLM) API",
+  "main": "zai.js",
+  "bin": {
+    "zai": "./zai.js"
+  },
+  "scripts": {
+    "start": "node zai.js"
+  },
+  "keywords": ["zai", "zhipu", "glm", "ai", "cli"],
+  "license": "MIT"
+}
