@@ -4,7 +4,8 @@ const {
     sleep,
     highlightSyntax,
     createProgressBar,
-    validateMessages
+    validateMessages,
+    countTokens
 } = require('../lib/utils');
 const path = require('path');
 
@@ -320,5 +321,29 @@ describe('z.ai CLI - validateMessages', () => {
     test('должен принимать роль system', () => {
         const messages = [{ role: 'system', content: 'You are helpful' }];
         expect(() => validateMessages(messages)).not.toThrow();
+    });
+});
+
+describe('z.ai CLI - countTokens', () => {
+    test('должен считать токены для простого текста', () => {
+        expect(countTokens('Hello')).toBe(2);
+    });
+
+    test('должен считать токены для длинного текста', () => {
+        const text = 'a'.repeat(400);
+        expect(countTokens(text)).toBe(100);
+    });
+
+    test('должен возвращать 0 для пустой строки', () => {
+        expect(countTokens('')).toBe(0);
+    });
+
+    test('должен возвращать 0 для null', () => {
+        expect(countTokens(null)).toBe(0);
+    });
+
+    test('должен округлять вверх', () => {
+        expect(countTokens('abc')).toBe(1);
+        expect(countTokens('abcde')).toBe(2);
     });
 });
