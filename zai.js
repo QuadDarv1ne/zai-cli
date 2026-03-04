@@ -2047,35 +2047,40 @@ async function interactiveMode() {
 async function singleMode(message, model) {
     try {
         const useStreaming = userConfig.streaming !== false;
+        const messages = [{ role: 'user', content: message }];
 
         if (useStreaming) {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
             let loadingDots = 0;
-            const loadingInterval = setInterval(() => {
+            let loadingInterval = setInterval(() => {
                 loadingDots = (loadingDots + 1) % 4;
                 process.stdout.write('\r\u001b[K' + '.'.repeat(loadingDots));
             }, 300);
 
             try {
+                let fullAnswer = '';
                 let firstChunk = true;
-                for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
+                for await (const chunk of chatStream(messages, model)) {
                     if (firstChunk) {
                         clearInterval(loadingInterval);
                         process.stdout.write('\r\u001b[K');
                         firstChunk = false;
                     }
+                    fullAnswer += chunk;
                     process.stdout.write(chalk.green(chunk));
                 }
+
+                console.log('\n');
+                saveChatHistory([{ role: 'user', content: message }, { role: 'assistant', content: fullAnswer }]);
             } finally {
                 clearInterval(loadingInterval);
             }
-
-            console.log('\n');
         } else {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
-            const answer = await chat([{ role: 'user', content: message }], model);
+            const answer = await chat(messages, model);
             console.log(highlightSyntax(answer));
             console.log('\n');
+            saveChatHistory([{ role: 'user', content: message }, { role: 'assistant', content: answer }]);
         }
     } catch (error) {
         console.error('❌ Ошибка:', error.message);
