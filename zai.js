@@ -17,11 +17,15 @@ const CONFIG = {
     API_KEY_FILE: path.join(__dirname, '.env'),
     HISTORY_FILE: path.join(__dirname, '.chat-history.json'),
     CONFIG_FILE: path.join(__dirname, 'zai.config.json'),
-    TIMEOUT: 60000,           // 60 секунд таймаут
-    MAX_RETRIES: 3,           // Максимум попыток
-    RETRY_DELAY: 1000,        // Задержка между попытками (мс)
-    MAX_HISTORY_MESSAGES: 100 // Максимум сообщений в истории
+    TIMEOUT: 60000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 1000,
+    MAX_HISTORY_MESSAGES: 100
 };
+
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // ЗАГРУЗКА .ENV
@@ -418,6 +422,7 @@ function validateMessages(messages) {
 async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = false) {
     validateMessages(messages);
 
+    const requestId = generateRequestId();
     const allMessages = systemPrompt
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
@@ -426,12 +431,14 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${API_KEY}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Request-ID': requestId
         },
         body: JSON.stringify({
             model: model,
             messages: allMessages,
-            stream: streaming
+            stream: streaming,
+            request_id: requestId
         })
     };
 
@@ -457,6 +464,7 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
 async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
     validateMessages(messages);
 
+    const requestId = generateRequestId();
     const allMessages = systemPrompt
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
@@ -465,12 +473,14 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${API_KEY}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Request-ID': requestId
         },
         body: JSON.stringify({
             model: model,
             messages: allMessages,
-            stream: true
+            stream: true,
+            request_id: requestId
         })
     };
 
