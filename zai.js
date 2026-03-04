@@ -17,10 +17,10 @@ const CONFIG = {
     API_KEY_FILE: path.join(__dirname, '.env'),
     HISTORY_FILE: path.join(__dirname, '.chat-history.json'),
     CONFIG_FILE: path.join(__dirname, 'zai.config.json'),
-    TIMEOUT: 60000,
+    TIMEOUT: 120000,
     MAX_RETRIES: 3,
-    RETRY_DELAY: 1000,
-    MAX_HISTORY_MESSAGES: 100
+    RETRY_DELAY: 3000,
+    MAX_HISTORY_MESSAGES: 100,
 };
 
 function generateRequestId() {
@@ -39,7 +39,7 @@ function addJitter(delay, factor = 0.2) {
 function loadEnv() {
     if (fs.existsSync(CONFIG.API_KEY_FILE)) {
         const envContent = fs.readFileSync(CONFIG.API_KEY_FILE, 'utf8');
-        envContent.split('\n').forEach(line => {
+        envContent.split('\n').forEach((line) => {
             const match = line.match(/^([^#][^=]+)=(.+)$/);
             if (match) {
                 process.env[match[1].trim()] = match[2].trim();
@@ -87,7 +87,11 @@ function validateApiKey() {
     // Проверка формата ключа (должен содержать точку)
     if (!API_KEY.includes('.') || API_KEY.length < 20) {
         console.error(chalk.red('\n❌ Ошибка: Неверный формат API ключа!'));
-        console.error(chalk.gray('   Ключ должен выглядеть как: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxx\n'));
+        console.error(
+            chalk.gray(
+                '   Ключ должен выглядеть как: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxx\n'
+            )
+        );
         process.exit(1);
     }
 
@@ -129,15 +133,31 @@ process.on('unhandledRejection', (reason) => {
 // ═══════════════════════════════════════════════════════════════════════
 
 function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function debounce(fn, delay) {
     let timeoutId;
-    return function(...args) {
+    return function (...args) {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => fn.apply(this, args), delay);
     };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ПОДСЧЁТ ТОКЕНОВ
+// ═══════════════════════════════════════════════════════════════════════
+
+function countTokens(text) {
+    if (!text) {
+        return 0;
+    }
+    const chars = text.length;
+    return Math.ceil(chars / 4);
+}
+
+function countHistoryTokens(history) {
+    return history.reduce((total, msg) => total + countTokens(msg.content), 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -151,7 +171,7 @@ async function fetchWithTimeout(url, options, timeout = CONFIG.TIMEOUT) {
     try {
         const response = await fetch(url, {
             ...options,
-            signal: controller.signal
+            signal: controller.signal,
         });
         clearTimeout(timeoutId);
         return response;
@@ -169,11 +189,6 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            // Проверка сетевого подключения перед запросом
-            if (!globalThis.navigator?.onLine && typeof globalThis.navigator !== 'undefined') {
-                throw new Error('Отсутствует сетевое подключение');
-            }
-
             const response = await fetchWithTimeout(url, options);
 
             if (!response.ok) {
@@ -186,30 +201,42 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 
                 // 429 - rate limit с экспоненциальным backoff
                 if (response.status === 429) {
-                    const retryAfter = response.headers.get('Retry-After') || (attempt * 2);
+                    const retryAfter = parseInt(response.headers.get('Retry-After')) || attempt * 3;
                     console.log(`\n⏳ Rate limit. Ожидание ${retryAfter}с...\n`);
                     await sleep(retryAfter * 1000);
                     continue;
                 }
 
-                throw new Error(`API Error ${response.status}: ${errorData.message || response.statusText}`);
+                throw new Error(
+                    `API Error ${response.status}: ${errorData.message || response.statusText}`
+                );
             }
 
             return response;
-
         } catch (error) {
             lastError = error;
 
             // Не ретраим ошибки аутентификации и таймауты
-            if (error.message.includes('401') || error.message.includes('Таймаут') || error.message.includes('сетевое')) {
+            if (
+                error.message.includes('401') ||
+                error.message.includes('Таймаут') ||
+                error.message.includes('сетевое')
+            ) {
                 throw error;
+            }
+
+            // Детальный лог ошибки
+            console.error(chalk.yellow('\n🔍 Ошибка запроса:'), error.message);
+            if (error.cause) {
+                console.error(chalk.yellow('Причина:'), error.cause.message || error.cause);
             }
 
             if (attempt < retries) {
                 const baseDelay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1);
                 const delay = addJitter(baseDelay);
-                console.log(`\n⚠️ Ошибка: ${error.message}`);
-                console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${(delay / 1000).toFixed(1)}с...\n`);
+                console.log(
+                    `\n🔄 Попытка ${attempt + 1} из ${retries} через ${(delay / 1000).toFixed(1)}с...\n`
+                );
                 await sleep(delay);
             }
         }
@@ -223,12 +250,15 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 // ═══════════════════════════════════════════════════════════════════════
 
 function highlightSyntax(code, _lang = '') {
-    if (!process.stdout.isTTY) {return code;} // Не красим если не терминал
+    if (!process.stdout.isTTY) {
+        return code;
+    } // Не красим если не терминал
 
     let highlighted = code;
 
     // Ключевые слова
-    const keywords = /\b(const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|typeof|instanceof|def|print|with|except|raise|lambda|yield|global|nonlocal|pass|break|continue|in|is|and|or|not|null|undefined|true|false|None|True|False)\b/g;
+    const keywords =
+        /\b(const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|typeof|instanceof|def|print|with|except|raise|lambda|yield|global|nonlocal|pass|break|continue|in|is|and|or|not|null|undefined|true|false|None|True|False)\b/g;
     highlighted = highlighted.replace(keywords, chalk.magenta('$1'));
 
     // Строки
@@ -252,15 +282,19 @@ function highlightSyntax(code, _lang = '') {
 
 function createProgressBar(total) {
     const bar = new SingleBar({
-        format: chalk.cyan('📊 [') + chalk.green('{bar}') + chalk.cyan(']') + ' {percentage}% | {value}/{total}',
+        format:
+            chalk.cyan('📊 [') +
+            chalk.green('{bar}') +
+            chalk.cyan(']') +
+            ' {percentage}% | {value}/{total}',
         barCompleteChar: '█',
         barIncompleteChar: '░',
-        hideCursor: true
+        hideCursor: true,
     });
     bar.start(total, 0);
     return {
         update: (increment = 1) => bar.increment(increment),
-        done: () => bar.stop()
+        done: () => bar.stop(),
     };
 }
 
@@ -303,29 +337,89 @@ function saveChatHistory(history) {
 // ═══════════════════════════════════════════════════════════════════════
 
 let conversationHistory = loadChatHistory();
-let currentModel = 'glm-4';
+let currentModel = 'glm-5';
+
+// ═══════════════════════════════════════════════════════════════════════
+// ДОСТУПНЫЕ МОДЕЛИ
+// ═══════════════════════════════════════════════════════════════════════
+
+const AVAILABLE_MODELS = [
+    { id: 'glm-5', name: 'GLM-5', description: 'Новейшая флагманская модель' },
+    { id: 'glm-4.7', name: 'GLM-4.7', description: 'Продвинутая универсальная' },
+    { id: 'glm-4.6', name: 'GLM-4.6', description: 'Сбалансированная производительность' },
+    { id: 'glm-4.5-air', name: 'GLM-4.5 Air', description: 'Быстрая и экономичная' },
+    { id: 'glm-4.5', name: 'GLM-4.5', description: 'Проверенная надёжная модель' },
+];
+
+// ═══════════════════════════════════════════════════════════════════════
+// ПОЛУЧЕНИЕ СПИСКА МОДЕЛЕЙ ИЗ API
+// ═══════════════════════════════════════════════════════════════════════
+
+async function fetchAvailableModels() {
+    try {
+        const options = {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        };
+
+        const response = await fetchWithTimeout(
+            CONFIG.API_URL.replace('/chat/completions', '/models'),
+            options,
+            10000
+        );
+
+        if (!response.ok) {
+            return AVAILABLE_MODELS; // Возвращаем дефолтный список при ошибке
+        }
+
+        const data = await response.json();
+
+        if (data.data && Array.isArray(data.data)) {
+            return data.data.map((m) => ({
+                id: m.id,
+                name: m.id.toUpperCase(),
+                description: `Модель от ${m.owned_by}`,
+                created: m.created,
+            }));
+        }
+
+        return AVAILABLE_MODELS;
+    } catch {
+        return AVAILABLE_MODELS; // Возвращаем дефолтный список при ошибке
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // СПРАВКА ДЛЯ ИНТЕРАКТИВНОГО РЕЖИМА
 // ═══════════════════════════════════════════════════════════════════════
 
 function showInteractiveHelp() {
-    console.log(chalk.cyan(`
+    console.log(
+        chalk.cyan(`
 ╔═══════════════════════════════════════════════════════════╗
 ║  КОМАНДЫ ИНТЕРАКТИВНОГО РЕЖИМА:                           ║
 ║    /help, /h, /?          → Справка                       ║
 ║    /clear, /c             → Очистить историю              ║
 ║    /model <name>          → Сменить модель                ║
 ║    /models                → Список моделей                ║
+║    /refresh-models        → Обновить список моделей       ║
 ║    /history               → Показать историю              ║
+║    /tokens                → Статистика токенов            ║
 ║    /save <file>           → Сохранить историю             ║
 ║    /load <file>           → Загрузить историю             ║
 ║    /cache                 → Очистить кэш файлов           ║
 ║    /export <file> [fmt]   → Экспорт в MD/HTML/TXT         ║
 ║    /config                → Показать настройки             ║
 ║    /exit, /quit, /q       → Выход                         ║
+║                                                              ║
+║  💡 Подсказка: Нажмите Tab для автодополнения команд       ║
+║  💡 Подсказка: ↑ ↓ для навигации по истории команд         ║
 ╚═══════════════════════════════════════════════════════════╝
-`));
+`)
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -339,7 +433,7 @@ program
     .description('CLI для работы с z.ai (Zhipu AI / GLM) API')
     .version(pkg.version)
     .argument('[query]', 'Запрос к AI')
-    .option('-m, --model <name>', 'Модель', 'glm-4')
+    .option('-m, --model <name>', 'Модель', 'glm-5')
     .option('-c, --create <description>', 'Создать проект по описанию')
     .option('-i, --init <template>', 'Инициализировать шаблон проекта')
     .option('-p, --project <task>', 'Работа с текущим проектом')
@@ -441,16 +535,16 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
     const options = {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+            Authorization: `Bearer ${API_KEY}`,
             'Content-Type': 'application/json',
-            'X-Request-ID': requestId
+            'X-Request-ID': requestId,
         },
         body: JSON.stringify({
             model: model,
             messages: allMessages,
             stream: streaming,
-            request_id: requestId
-        })
+            request_id: requestId,
+        }),
     };
 
     const response = await fetchWithRetry(CONFIG.API_URL, options);
@@ -483,16 +577,16 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
     const options = {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+            Authorization: `Bearer ${API_KEY}`,
             'Content-Type': 'application/json',
-            'X-Request-ID': requestId
+            'X-Request-ID': requestId,
         },
         body: JSON.stringify({
             model: model,
             messages: allMessages,
             stream: true,
-            request_id: requestId
-        })
+            request_id: requestId,
+        }),
     };
 
     const response = await fetchWithRetry(CONFIG.API_URL, options);
@@ -512,12 +606,17 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
             const { done, value } = await Promise.race([
                 reader.read(),
                 new Promise((_, reject) => {
-                    chunkTimeout = setTimeout(() => reject(new Error('Таймаут получения данных')), 30000);
-                })
+                    chunkTimeout = setTimeout(
+                        () => reject(new Error('Таймаут получения данных')),
+                        30000
+                    );
+                }),
             ]);
             clearTimeout(chunkTimeout);
 
-            if (done) {break;}
+            if (done) {
+                break;
+            }
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
@@ -527,7 +626,9 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
                 const trimmed = line.trim();
                 if (trimmed.startsWith('data: ')) {
                     const data = trimmed.slice(6);
-                    if (data === '[DONE]') {continue;}
+                    if (data === '[DONE]') {
+                        continue;
+                    }
                     try {
                         const parsed = JSON.parse(data);
                         const content = parsed.choices?.[0]?.delta?.content || '';
@@ -541,13 +642,17 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
             }
         }
     } catch (error) {
-        if (chunkTimeout) {clearTimeout(chunkTimeout);}
+        if (chunkTimeout) {
+            clearTimeout(chunkTimeout);
+        }
         if (error.message === 'Таймаут получения данных') {
             throw new Error('Превышено время ожидания ответа от сервера (30с)', { cause: error });
         }
         throw error;
     } finally {
-        if (chunkTimeout) {clearTimeout(chunkTimeout);}
+        if (chunkTimeout) {
+            clearTimeout(chunkTimeout);
+        }
         reader.releaseLock();
     }
 }
@@ -575,20 +680,48 @@ function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
     const result = [];
     let totalSize = 0;
     const CODE_EXTENSIONS = new Set([
-        '.js', '.ts', '.py', '.php', '.java', '.cpp', '.c', '.h',
-        '.cs', '.rb', '.go', '.rs', '.swift', '.kt', '.vue',
-        '.jsx', '.tsx', '.html', '.css', '.scss', '.json',
-        '.yaml', '.yml', '.md', '.txt', '.sql', '.sh', '.bat'
+        '.js',
+        '.ts',
+        '.py',
+        '.php',
+        '.java',
+        '.cpp',
+        '.c',
+        '.h',
+        '.cs',
+        '.rb',
+        '.go',
+        '.rs',
+        '.swift',
+        '.kt',
+        '.vue',
+        '.jsx',
+        '.tsx',
+        '.html',
+        '.css',
+        '.scss',
+        '.json',
+        '.yaml',
+        '.yml',
+        '.md',
+        '.txt',
+        '.sql',
+        '.sh',
+        '.bat',
     ]);
 
     function walk(currentDir) {
-        if (result.length >= maxFiles) {return;}
+        if (result.length >= maxFiles) {
+            return;
+        }
 
         try {
             const entries = fs.readdirSync(currentDir, { withFileTypes: true });
 
             for (const entry of entries) {
-                if (entry.name.startsWith('.') || entry.name === 'node_modules') {continue;}
+                if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+                    continue;
+                }
 
                 const fullPath = path.join(currentDir, entry.name);
 
@@ -646,7 +779,7 @@ function getFileContent(filePath) {
     if (fileCache.has(absolutePath)) {
         return {
             path: absolutePath,
-            content: fileCache.get(absolutePath)
+            content: fileCache.get(absolutePath),
         };
     }
 
@@ -656,7 +789,7 @@ function getFileContent(filePath) {
 
     return {
         path: absolutePath,
-        content
+        content,
     };
 }
 
@@ -668,50 +801,57 @@ function extractFilesFromResponse(response, baseDir) {
     const files = [];
     const filePattern = /```(\w+)?\s*\n(?:\/\/\/\s*FILE:\s*([^\n]+)\n)?([\s\S]*?)```/g;
     const simpleFilePattern = /FILE:\s*([^\n]+)\n([\s\S]*?)(?=FILE:|$)/g;
-    
+
     let match;
-    
+
     while ((match = filePattern.exec(response)) !== null) {
         const lang = match[1] || '';
         const filePath = match[2];
         const content = match[3].trim();
-        
+
         if (filePath) {
             files.push({
                 path: path.join(baseDir, filePath),
                 content: content,
-                language: lang
+                language: lang,
             });
         }
     }
-    
+
     while ((match = simpleFilePattern.exec(response)) !== null) {
         const filePath = match[1].trim();
         const content = match[2].trim();
-        
+
         if (filePath && content) {
             files.push({
                 path: path.join(baseDir, filePath),
-                content: content
+                content: content,
             });
         }
     }
-    
+
     if (files.length === 0) {
         const codeBlockMatch = response.match(/```(\w+)?\s*\n([\s\S]*?)```/);
         if (codeBlockMatch) {
-            const extMap = { python: '.py', javascript: '.js', typescript: '.ts', 
-                           php: '.php', java: '.java', cpp: '.cpp', c: '.c' };
+            const extMap = {
+                python: '.py',
+                javascript: '.js',
+                typescript: '.ts',
+                php: '.php',
+                java: '.java',
+                cpp: '.cpp',
+                c: '.c',
+            };
             const lang = codeBlockMatch[1] || '';
             const ext = extMap[lang.toLowerCase()] || '.txt';
-            
+
             files.push({
                 path: path.join(baseDir, 'output' + ext),
-                content: codeBlockMatch[2].trim()
+                content: codeBlockMatch[2].trim(),
             });
         }
     }
-    
+
     return files;
 }
 
@@ -723,7 +863,7 @@ async function createProject(description) {
     console.log('\n🚀 Создание проекта...\n');
     console.log('📝 Описание:', description);
     console.log('\n🤔 Анализирую запрос и генерирую структуру...\n');
-    
+
     const systemPrompt = `Ты опытный разработчик, который создаёт проекты и файлы по описанию.
 
 ВАЖНО: Для каждого файла используй формат:
@@ -750,17 +890,17 @@ console.log("Hi");
         currentModel,
         systemPrompt
     );
-    
+
     console.log('\n📄 Ответ AI:\n');
     console.log(highlightSyntax(response));
-    
+
     const projectDir = path.join(process.cwd(), 'generated-project');
     const files = extractFilesFromResponse(response, projectDir);
-    
+
     if (files.length > 0) {
         console.log('\n\n💾 Сохранение файлов...\n');
         const progress = createProgressBar(files.length);
-        
+
         for (const file of files) {
             const dir = path.dirname(file.path);
             if (!fs.existsSync(dir)) {
@@ -769,7 +909,7 @@ console.log("Hi");
             fs.writeFileSync(file.path, file.content, 'utf8');
             progress.update();
         }
-        
+
         console.log(`\n✨ Проект создан в: ${projectDir}\n`);
     } else {
         console.log('\n⚠️ Не удалось извлечь файлы из ответа. Попробуйте уточнить запрос.\n');
@@ -781,155 +921,265 @@ console.log("Hi");
 // ═══════════════════════════════════════════════════════════════════════
 
 const TEMPLATES = {
-    'node': {
+    node: {
         name: 'Node.js проект',
         files: [
-            { path: 'package.json', content: '{\n  "name": "project",\n  "version": "1.0.0",\n  "main": "index.js",\n  "scripts": {\n    "start": "node index.js",\n    "dev": "node --watch index.js"\n  }\n}\n' },
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "project",\n  "version": "1.0.0",\n  "main": "index.js",\n  "scripts": {\n    "start": "node index.js",\n    "dev": "node --watch index.js"\n  }\n}\n',
+            },
             { path: 'index.js', content: 'console.log("Hello, World!");\n' },
             { path: '.gitignore', content: 'node_modules/\n.env\n' },
-            { path: 'README.md', content: '# Project\n\nОписание проекта\n' }
-        ]
+            { path: 'README.md', content: '# Project\n\nОписание проекта\n' },
+        ],
     },
-    'python': {
+    python: {
         name: 'Python проект',
         files: [
-            { path: 'main.py', content: 'def main():\n    print("Hello, World!")\n\nif __name__ == "__main__":\n    main()\n' },
+            {
+                path: 'main.py',
+                content:
+                    'def main():\n    print("Hello, World!")\n\nif __name__ == "__main__":\n    main()\n',
+            },
             { path: 'requirements.txt', content: '# Зависимости\n' },
             { path: '.gitignore', content: '__pycache__/\n*.pyc\n.venv/\n.env\n' },
-            { path: 'README.md', content: '# Python Project\n\nОписание проекта\n' }
-        ]
+            { path: 'README.md', content: '# Python Project\n\nОписание проекта\n' },
+        ],
     },
-    'react': {
+    react: {
         name: 'React проект',
         files: [
-            { path: 'package.json', content: '{\n  "name": "react-app",\n  "version": "0.1.0",\n  "private": true,\n  "dependencies": {\n    "react": "^18.2.0",\n    "react-dom": "^18.2.0"\n  },\n  "scripts": {\n    "start": "react-scripts start",\n    "build": "react-scripts build"\n  }\n}\n' },
-            { path: 'public/index.html', content: '<!DOCTYPE html>\n<html lang="ru">\n<head>\n  <meta charset="UTF-8">\n  <title>React App</title>\n</head>\n<body>\n  <div id="root"></div>\n</body>\n</html>\n' },
-            { path: 'src/index.js', content: 'import React from "react";\nimport ReactDOM from "react-dom/client";\nimport App from "./App";\n\nconst root = ReactDOM.createRoot(document.getElementById("root"));\nroot.render(<App />);\n' },
-            { path: 'src/App.js', content: 'function App() {\n  return (\n    <div className="App">\n      <h1>Hello, React!</h1>\n    </div>\n  );\n}\n\nexport default App;\n' },
-            { path: '.gitignore', content: 'node_modules/\nbuild/\n.env\n' }
-        ]
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "react-app",\n  "version": "0.1.0",\n  "private": true,\n  "dependencies": {\n    "react": "^18.2.0",\n    "react-dom": "^18.2.0"\n  },\n  "scripts": {\n    "start": "react-scripts start",\n    "build": "react-scripts build"\n  }\n}\n',
+            },
+            {
+                path: 'public/index.html',
+                content:
+                    '<!DOCTYPE html>\n<html lang="ru">\n<head>\n  <meta charset="UTF-8">\n  <title>React App</title>\n</head>\n<body>\n  <div id="root"></div>\n</body>\n</html>\n',
+            },
+            {
+                path: 'src/index.js',
+                content:
+                    'import React from "react";\nimport ReactDOM from "react-dom/client";\nimport App from "./App";\n\nconst root = ReactDOM.createRoot(document.getElementById("root"));\nroot.render(<App />);\n',
+            },
+            {
+                path: 'src/App.js',
+                content:
+                    'function App() {\n  return (\n    <div className="App">\n      <h1>Hello, React!</h1>\n    </div>\n  );\n}\n\nexport default App;\n',
+            },
+            { path: '.gitignore', content: 'node_modules/\nbuild/\n.env\n' },
+        ],
     },
-    'vue': {
+    vue: {
         name: 'Vue 3 проект',
         files: [
-            { path: 'package.json', content: '{\n  "name": "vue-app",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "vue": "^3.3.0"\n  }\n}\n' },
-            { path: 'index.html', content: '<!DOCTYPE html>\n<html lang="ru">\n<head><title>Vue App</title></head>\n<body><div id="app"></div><script type="module" src="/src/main.js"></script></body>\n</html>\n' },
-            { path: 'src/main.js', content: 'import { createApp } from "vue";\nimport App from "./App.vue";\n\ncreateApp(App).mount("#app");\n' },
-            { path: 'src/App.vue', content: '<template>\n  <div>\n    <h1>{{ message }}</h1>\n  </div>\n</template>\n\n<script setup>\nimport { ref } from "vue";\nconst message = ref("Hello, Vue 3!");\n</script>\n' },
-            { path: 'vite.config.js', content: 'import { defineConfig } from "vite";\nimport vue from "@vitejs/plugin-vue";\n\nexport default defineConfig({\n  plugins: [vue()]\n});\n' }
-        ]
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "vue-app",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "vue": "^3.3.0"\n  }\n}\n',
+            },
+            {
+                path: 'index.html',
+                content:
+                    '<!DOCTYPE html>\n<html lang="ru">\n<head><title>Vue App</title></head>\n<body><div id="app"></div><script type="module" src="/src/main.js"></script></body>\n</html>\n',
+            },
+            {
+                path: 'src/main.js',
+                content:
+                    'import { createApp } from "vue";\nimport App from "./App.vue";\n\ncreateApp(App).mount("#app");\n',
+            },
+            {
+                path: 'src/App.vue',
+                content:
+                    '<template>\n  <div>\n    <h1>{{ message }}</h1>\n  </div>\n</template>\n\n<script setup>\nimport { ref } from "vue";\nconst message = ref("Hello, Vue 3!");\n</script>\n',
+            },
+            {
+                path: 'vite.config.js',
+                content:
+                    'import { defineConfig } from "vite";\nimport vue from "@vitejs/plugin-vue";\n\nexport default defineConfig({\n  plugins: [vue()]\n});\n',
+            },
+        ],
     },
-    'flask': {
+    flask: {
         name: 'Flask приложение',
         files: [
-            { path: 'app.py', content: 'from flask import Flask\n\napp = Flask(__name__)\n\n@app.route("/")\ndef hello():\n    return "Hello, Flask!"\n\nif __name__ == "__main__":\n    app.run(debug=True)\n' },
+            {
+                path: 'app.py',
+                content:
+                    'from flask import Flask\n\napp = Flask(__name__)\n\n@app.route("/")\ndef hello():\n    return "Hello, Flask!"\n\nif __name__ == "__main__":\n    app.run(debug=True)\n',
+            },
             { path: 'requirements.txt', content: 'flask>=2.0.0\n' },
-            { path: 'templates/index.html', content: '<!DOCTYPE html>\n<html>\n<head><title>Flask App</title></head>\n<body><h1>Hello!</h1></body>\n</html>\n' },
-            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.venv/\n.env\n' }
-        ]
+            {
+                path: 'templates/index.html',
+                content:
+                    '<!DOCTYPE html>\n<html>\n<head><title>Flask App</title></head>\n<body><h1>Hello!</h1></body>\n</html>\n',
+            },
+            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.venv/\n.env\n' },
+        ],
     },
-    'express': {
+    express: {
         name: 'Express.js API',
         files: [
-            { path: 'package.json', content: '{\n  "name": "express-api",\n  "version": "1.0.0",\n  "main": "server.js",\n  "scripts": {\n    "start": "node server.js",\n    "dev": "nodemon server.js"\n  },\n  "dependencies": {\n    "express": "^4.18.0"\n  }\n}\n' },
-            { path: 'server.js', content: 'const express = require("express");\nconst app = express();\nconst PORT = process.env.PORT || 3000;\n\napp.use(express.json());\n\napp.get("/", (req, res) => {\n  res.json({ message: "Hello, Express!" });\n});\n\napp.listen(PORT, () => {\n  console.log(`Server running on port ${PORT}`);\n});\n' },
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "express-api",\n  "version": "1.0.0",\n  "main": "server.js",\n  "scripts": {\n    "start": "node server.js",\n    "dev": "nodemon server.js"\n  },\n  "dependencies": {\n    "express": "^4.18.0"\n  }\n}\n',
+            },
+            {
+                path: 'server.js',
+                content:
+                    'const express = require("express");\nconst app = express();\nconst PORT = process.env.PORT || 3000;\n\napp.use(express.json());\n\napp.get("/", (req, res) => {\n  res.json({ message: "Hello, Express!" });\n});\n\napp.listen(PORT, () => {\n  console.log(`Server running on port ${PORT}`);\n});\n',
+            },
             { path: '.gitignore', content: 'node_modules/\n.env\n' },
-            { path: '.env', content: 'PORT=3000\n' }
-        ]
+            { path: '.env', content: 'PORT=3000\n' },
+        ],
     },
     'telegram-bot': {
         name: 'Telegram бот (Python)',
         files: [
-            { path: 'bot.py', content: 'import telebot\nimport os\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\nBOT_TOKEN = os.getenv("BOT_TOKEN")\nbot = telebot.TeleBot(BOT_TOKEN)\n\n@bot.message_handler(commands=["start"])\ndef handle_start(message):\n    bot.reply_to(message, "Привет! Я бот.")\n\n@bot.message_handler(func=lambda m: True)\ndef handle_all(message):\n    bot.reply_to(message, f"Вы написали: {message.text}")\n\nif __name__ == "__main__":\n    bot.infinity_polling()\n' },
-            { path: 'requirements.txt', content: 'pyTelegramBotAPI>=4.0.0\npython-dotenv>=1.0.0\n' },
+            {
+                path: 'bot.py',
+                content:
+                    'import telebot\nimport os\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\nBOT_TOKEN = os.getenv("BOT_TOKEN")\nbot = telebot.TeleBot(BOT_TOKEN)\n\n@bot.message_handler(commands=["start"])\ndef handle_start(message):\n    bot.reply_to(message, "Привет! Я бот.")\n\n@bot.message_handler(func=lambda m: True)\ndef handle_all(message):\n    bot.reply_to(message, f"Вы написали: {message.text}")\n\nif __name__ == "__main__":\n    bot.infinity_polling()\n',
+            },
+            {
+                path: 'requirements.txt',
+                content: 'pyTelegramBotAPI>=4.0.0\npython-dotenv>=1.0.0\n',
+            },
             { path: '.env', content: 'BOT_TOKEN=your_bot_token_here\n' },
-            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.env\n' }
-        ]
+            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.env\n' },
+        ],
     },
-    'cli': {
+    cli: {
         name: 'CLI утилита (Node.js)',
         files: [
-            { path: 'package.json', content: '{\n  "name": "my-cli",\n  "version": "1.0.0",\n  "bin": {\n    "mycli": "./cli.js"\n  },\n  "scripts": {\n    "start": "node cli.js"\n  }\n}\n' },
-            { path: 'cli.js', content: '#!/usr/bin/env node\n\nconst args = process.argv.slice(2);\n\nconsole.log("CLI запущен с аргументами:", args);\n' },
-            { path: '.gitignore', content: 'node_modules/\n' }
-        ]
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "my-cli",\n  "version": "1.0.0",\n  "bin": {\n    "mycli": "./cli.js"\n  },\n  "scripts": {\n    "start": "node cli.js"\n  }\n}\n',
+            },
+            {
+                path: 'cli.js',
+                content:
+                    '#!/usr/bin/env node\n\nconst args = process.argv.slice(2);\n\nconsole.log("CLI запущен с аргументами:", args);\n',
+            },
+            { path: '.gitignore', content: 'node_modules/\n' },
+        ],
     },
-    'nextjs': {
+    nextjs: {
         name: 'Next.js 14 проект',
         files: [
-            { path: 'package.json', content: '{\n  "name": "next-app",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "next dev",\n    "build": "next build",\n    "start": "next start"\n  },\n  "dependencies": {\n    "next": "^14.0.0",\n    "react": "^18.2.0",\n    "react-dom": "^18.2.0"\n  }\n}\n' },
-            { path: 'app/page.js', content: 'export default function Home() {\n  return (\n    <main>\n      <h1>Hello, Next.js 14!</h1>\n    </main>\n  );\n}\n' },
-            { path: 'app/layout.js', content: 'export const metadata = {\n  title: "Next.js App",\n  description: "Generated with z.ai CLI"\n};\n\nexport default function RootLayout({ children }) {\n  return (\n    <html lang="ru">\n      <body>{children}</body>\n    </html>\n  );\n}\n' },
-            { path: 'next.config.js', content: '/** @type {import("next").NextConfig} */\nconst nextConfig = {};\n\nmodule.exports = nextConfig;\n' },
-            { path: '.gitignore', content: 'node_modules/\n.next/\n.env\n' }
-        ]
+            {
+                path: 'package.json',
+                content:
+                    '{\n  "name": "next-app",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "next dev",\n    "build": "next build",\n    "start": "next start"\n  },\n  "dependencies": {\n    "next": "^14.0.0",\n    "react": "^18.2.0",\n    "react-dom": "^18.2.0"\n  }\n}\n',
+            },
+            {
+                path: 'app/page.js',
+                content:
+                    'export default function Home() {\n  return (\n    <main>\n      <h1>Hello, Next.js 14!</h1>\n    </main>\n  );\n}\n',
+            },
+            {
+                path: 'app/layout.js',
+                content:
+                    'export const metadata = {\n  title: "Next.js App",\n  description: "Generated with z.ai CLI"\n};\n\nexport default function RootLayout({ children }) {\n  return (\n    <html lang="ru">\n      <body>{children}</body>\n    </html>\n  );\n}\n',
+            },
+            {
+                path: 'next.config.js',
+                content:
+                    '/** @type {import("next").NextConfig} */\nconst nextConfig = {};\n\nmodule.exports = nextConfig;\n',
+            },
+            { path: '.gitignore', content: 'node_modules/\n.next/\n.env\n' },
+        ],
     },
-    'fastapi': {
+    fastapi: {
         name: 'FastAPI проект',
         files: [
-            { path: 'main.py', content: 'from fastapi import FastAPI\n\napp = FastAPI(title="My API")\n\n@app.get("/")\ndef read_root():\n    return {"Hello": "World"}\n\n@app.get("/items/{item_id}")\ndef read_item(item_id: int, q: str = None):\n    return {"item_id": item_id, "q": q}\n' },
+            {
+                path: 'main.py',
+                content:
+                    'from fastapi import FastAPI\n\napp = FastAPI(title="My API")\n\n@app.get("/")\ndef read_root():\n    return {"Hello": "World"}\n\n@app.get("/items/{item_id}")\ndef read_item(item_id: int, q: str = None):\n    return {"item_id": item_id, "q": q}\n',
+            },
             { path: 'requirements.txt', content: 'fastapi>=0.104.0\nuvicorn>=0.24.0\n' },
-            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.venv/\n.env\n' }
-        ]
+            { path: '.gitignore', content: '__pycache__/\n*.pyc\n.venv/\n.env\n' },
+        ],
     },
-    'django': {
+    django: {
         name: 'Django проект',
         files: [
             { path: 'requirements.txt', content: 'django>=4.2.0\n' },
-            { path: 'manage.py', content: '#!/usr/bin/env python\nimport os\nimport sys\n\ndef main():\n    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")\n    try:\n        from django.core.management import execute_from_command_line\n    except ImportError as exc:\n        raise ImportError("Couldn\'t import Django.") from exc\n    execute_from_command_line(sys.argv)\n\nif __name__ == "__main__":\n    main()\n' },
-            { path: '.gitignore', content: '__pycache__/\n*.pyc\ndb.sqlite3\n.env\n' }
-        ]
+            {
+                path: 'manage.py',
+                content:
+                    '#!/usr/bin/env python\nimport os\nimport sys\n\ndef main():\n    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")\n    try:\n        from django.core.management import execute_from_command_line\n    except ImportError as exc:\n        raise ImportError("Couldn\'t import Django.") from exc\n    execute_from_command_line(sys.argv)\n\nif __name__ == "__main__":\n    main()\n',
+            },
+            { path: '.gitignore', content: '__pycache__/\n*.pyc\ndb.sqlite3\n.env\n' },
+        ],
     },
-    'go': {
+    go: {
         name: 'Go проект',
         files: [
-            { path: 'main.go', content: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, Go!")\n}\n' },
+            {
+                path: 'main.go',
+                content:
+                    'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, Go!")\n}\n',
+            },
             { path: 'go.mod', content: 'module example.com/project\n\ngo 1.21\n' },
-            { path: '.gitignore', content: '*.exe\n*.exe~\n*.dll\n*.so\n*.dylib\n*.test\n*.out\nvendor/\n' }
-        ]
+            {
+                path: '.gitignore',
+                content: '*.exe\n*.exe~\n*.dll\n*.so\n*.dylib\n*.test\n*.out\nvendor/\n',
+            },
+        ],
     },
-    'rust': {
+    rust: {
         name: 'Rust проект',
         files: [
-            { path: 'Cargo.toml', content: '[package]\nname = "my_project"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n' },
+            {
+                path: 'Cargo.toml',
+                content:
+                    '[package]\nname = "my_project"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n',
+            },
             { path: 'src/main.rs', content: 'fn main() {\n    println!("Hello, Rust!");\n}\n' },
-            { path: '.gitignore', content: '/target\n**/*.rs.bk\nCargo.lock\n' }
-        ]
-    }
+            { path: '.gitignore', content: '/target\n**/*.rs.bk\nCargo.lock\n' },
+        ],
+    },
 };
 
 async function initTemplate(templateName) {
     const template = TEMPLATES[templateName.toLowerCase()];
-    
+
     if (!template) {
         console.log('\n❌ Шаблон не найден.\n');
         console.log('📋 Доступные шаблоны:\n');
-        Object.keys(TEMPLATES).forEach(key => {
+        Object.keys(TEMPLATES).forEach((key) => {
             console.log(`  • ${key} — ${TEMPLATES[key].name}`);
         });
         console.log('\n');
         return;
     }
-    
+
     const targetDir = path.join(process.cwd(), templateName);
     console.log(`\n📦 Инициализация шаблона: ${template.name}\n`);
-    
+
     const progress = createProgressBar(template.files.length);
-    
+
     for (const file of template.files) {
         const filePath = path.join(targetDir, file.path);
         const dir = path.dirname(filePath);
-        
+
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        
+
         fs.writeFileSync(filePath, file.content, 'utf8');
         progress.update();
     }
-    
+
     console.log(`\n✨ Шаблон создан в: ${targetDir}\n`);
-    
+
     if (templateName.toLowerCase() === 'telegram-bot') {
         console.log('📌 Следующие шаги:');
         console.log('  1. Откройте .env и укажите BOT_TOKEN');
@@ -945,18 +1195,18 @@ async function initTemplate(templateName) {
 async function projectMode(task) {
     console.log('\n📁 Работа с проектом...\n');
     console.log('📝 Задача:', task);
-    
+
     console.log('\n🔍 Сканирование проекта...\n');
     const files = readFilesRecursively(process.cwd());
-    
+
     console.log(`📄 Найдено файлов: ${files.length}\n`);
-    
+
     const systemPrompt = `Ты опытный разработчик, помогаешь с задачами в проекте.
     
 У пользователя есть проект с файлами. Он хочет: ${task}
 
 Файлы проекта:
-${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n')}
+${files.map((f) => `\n=== ${f.path} ===\n${f.content}`).join('\n')}
 
 Дай конкретный ответ с кодом и инструкциями. Для изменений файлов используй формат:
 \`\`\`<язык>
@@ -969,24 +1219,24 @@ ${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n')}
         currentModel,
         systemPrompt
     );
-    
+
     console.log('\n🤖 Ответ AI:\n');
     console.log(highlightSyntax(response));
-    
+
     const filesToUpdate = extractFilesFromResponse(response, process.cwd());
-    
+
     if (filesToUpdate.length > 0) {
         console.log('\n\n💾 Найденные файлы для обновления:\n');
-        filesToUpdate.forEach(f => console.log(`  • ${f.path}`));
-        
+        filesToUpdate.forEach((f) => console.log(`  • ${f.path}`));
+
         const rl = readline.createInterface({
             input: process.stdin,
-            output: process.stdout
+            output: process.stdout,
         });
-        
+
         rl.question('\n💾 Применить изменения? (y/n): ', (answer) => {
             rl.close();
-            
+
             if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                 for (const file of filesToUpdate) {
                     const dir = path.dirname(file.path);
@@ -1010,11 +1260,11 @@ ${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n')}
 
 async function refactorFile(filePath) {
     console.log('\n🔧 Рефакторинг файла...\n');
-    
+
     try {
         const file = getFileContent(filePath);
         console.log(`📄 Файл: ${file.path}\n`);
-        
+
         const systemPrompt = `Ты опытный разработчик, делаешь рефакторинг кода.
 Проанализируй код и предложи улучшения:
 - Улучши читаемость
@@ -1035,21 +1285,21 @@ async function refactorFile(filePath) {
             currentModel,
             systemPrompt
         );
-        
+
         console.log('\n🤖 Предложения по рефакторингу:\n');
         console.log(highlightSyntax(response));
-        
+
         const files = extractFilesFromResponse(response, path.dirname(file.path));
-        
+
         if (files.length > 0) {
             const rl = readline.createInterface({
                 input: process.stdin,
-                output: process.stdout
+                output: process.stdout,
             });
-            
+
             rl.question('\n💾 Применить изменения? (y/n): ', (answer) => {
                 rl.close();
-                
+
                 if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                     fs.writeFileSync(files[0].path, files[0].content, 'utf8');
                     console.log(`\n✅ Файл обновлён: ${files[0].path}\n`);
@@ -1069,9 +1319,11 @@ async function refactorFile(filePath) {
 
 async function analyzePath(targetPath) {
     console.log('\n🔍 Анализ кода...\n');
-    
-    const absolutePath = path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath);
-    
+
+    const absolutePath = path.isAbsolute(targetPath)
+        ? targetPath
+        : path.join(process.cwd(), targetPath);
+
     if (!fs.existsSync(absolutePath)) {
         console.error(`❌ Путь не найден: ${absolutePath}\n`);
         return;
@@ -1084,16 +1336,16 @@ async function analyzePath(targetPath) {
 
     if (fs.statSync(absolutePath).isDirectory()) {
         const files = readFilesRecursively(absolutePath);
-        content = files.map(f => `=== ${f.path} ===\n${f.content}`).join('\n\n');
+        content = files.map((f) => `=== ${f.path} ===\n${f.content}`).join('\n\n');
         description = `Папка: ${absolutePath}\nФайлов: ${files.length}`;
     } else {
         const file = getFileContent(targetPath);
         content = file.content;
         description = `Файл: ${file.path}`;
     }
-    
+
     console.log(`📄 ${description}\n`);
-    
+
     const systemPrompt = `Ты опытный разработчик, делаешь код-ревью.
 Проанализируй код и дай развёрнутый ответ:
 
@@ -1113,7 +1365,7 @@ ${content}`;
         currentModel,
         systemPrompt
     );
-    
+
     console.log('\n🤖 Анализ:\n');
     console.log(highlightSyntax(response));
     console.log('\n');
@@ -1125,17 +1377,22 @@ ${content}`;
 
 async function explainFile(filePath) {
     console.log('\n📖 Объяснение кода...\n');
-    
+
     try {
         const file = getFileContent(filePath);
         console.log(`📄 Файл: ${file.path}\n`);
-        
+
         const response = await chat(
-            [{ role: 'user', content: `Объясни подробно как работает этот код:\n\n${file.content}` }],
+            [
+                {
+                    role: 'user',
+                    content: `Объясни подробно как работает этот код:\n\n${file.content}`,
+                },
+            ],
             currentModel,
             'Ты опытный разработчик, который объясняет код понятно и подробно. Разбери каждую часть кода.'
         );
-        
+
         console.log('\n🤖 Объяснение:\n');
         console.log(highlightSyntax(response));
         console.log('\n');
@@ -1150,11 +1407,11 @@ async function explainFile(filePath) {
 
 async function createTests(filePath) {
     console.log('\n🧪 Создание тестов...\n');
-    
+
     try {
         const file = getFileContent(filePath);
         console.log(`📄 Файл: ${file.path}\n`);
-        
+
         const ext = path.extname(filePath).toLowerCase();
         const testFrameworks = {
             '.js': 'Jest',
@@ -1162,31 +1419,36 @@ async function createTests(filePath) {
             '.py': 'pytest',
             '.php': 'PHPUnit',
             '.java': 'JUnit',
-            '.rb': 'RSpec'
+            '.rb': 'RSpec',
         };
-        
+
         const framework = testFrameworks[ext] || 'unittest';
-        
+
         const response = await chat(
-            [{ role: 'user', content: `Создай полные тесты для этого кода. Используй ${framework}. Верни код тестов в формате:\n\`\`\`\n// FILE: <путь к тест-файлу>\n<код тестов>\n\`\`\`\n\nКод:\n${file.content}` }],
+            [
+                {
+                    role: 'user',
+                    content: `Создай полные тесты для этого кода. Используй ${framework}. Верни код тестов в формате:\n\`\`\`\n// FILE: <путь к тест-файлу>\n<код тестов>\n\`\`\`\n\nКод:\n${file.content}`,
+                },
+            ],
             currentModel,
             'Ты опытный разработчик, пишешь качественные тесты с покрытием всех случаев.'
         );
-        
+
         console.log('\n🤖 Тесты:\n');
         console.log(highlightSyntax(response));
-        
+
         const files = extractFilesFromResponse(response, path.dirname(file.path));
-        
+
         if (files.length > 0) {
             const rl = readline.createInterface({
                 input: process.stdin,
-                output: process.stdout
+                output: process.stdout,
             });
-            
+
             rl.question('\n💾 Сохранить тесты? (y/n): ', (answer) => {
                 rl.close();
-                
+
                 if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                     for (const f of files) {
                         const dir = path.dirname(f.path);
@@ -1213,36 +1475,41 @@ async function createTests(filePath) {
 
 async function createDocs(filePath) {
     console.log('\n📚 Создание документации...\n');
-    
+
     try {
         const file = getFileContent(filePath);
         console.log(`📄 Файл: ${file.path}\n`);
-        
+
         const response = await chat(
-            [{ role: 'user', content: `Создай подробную документацию для этого кода (README.md с описанием, примерами использования, API и т.д.):\n\n${file.content}` }],
+            [
+                {
+                    role: 'user',
+                    content: `Создай подробную документацию для этого кода (README.md с описанием, примерами использования, API и т.д.):\n\n${file.content}`,
+                },
+            ],
             currentModel,
             'Ты технический писатель, создаёшь понятную и полную документацию.'
         );
-        
+
         console.log('\n🤖 Документация:\n');
         console.log(highlightSyntax(response));
-        
+
         const readmePath = path.join(path.dirname(file.path), 'README.md');
         const rl = readline.createInterface({
             input: process.stdin,
-            output: process.stdout
+            output: process.stdout,
         });
-        
+
         rl.question('\n💾 Сохранить в README.md? (y/n): ', (answer) => {
             rl.close();
-            
+
             if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                 let docContent = response;
                 const match = response.match(/```markdown?\n([\s\S]*?)```/);
                 if (match) {
                     docContent = match[1].trim();
                 }
-                
+
                 fs.writeFileSync(readmePath, docContent, 'utf8');
                 console.log(`\n✅ Документация сохранена: ${readmePath}\n`);
             } else {
@@ -1295,7 +1562,7 @@ async function fixFile(filePath) {
         if (files.length > 0) {
             const rl = readline.createInterface({
                 input: process.stdin,
-                output: process.stdout
+                output: process.stdout,
             });
 
             rl.question('\n💾 Применить исправления? (y/n): ', (answer) => {
@@ -1321,7 +1588,9 @@ async function fixFile(filePath) {
 async function securityAudit(targetPath) {
     console.log('\n🔒 Аудит безопасности...\n');
 
-    const absolutePath = path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath);
+    const absolutePath = path.isAbsolute(targetPath)
+        ? targetPath
+        : path.join(process.cwd(), targetPath);
 
     if (!fs.existsSync(absolutePath)) {
         console.error(`❌ Путь не найден: ${absolutePath}\n`);
@@ -1345,7 +1614,7 @@ async function securityAudit(targetPath) {
 6. Проблемы с обработкой входных данных
 
 Код для анализа:
-${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n\n')}
+${files.map((f) => `\n=== ${f.path} ===\n${f.content}`).join('\n\n')}
 
 Дай развёрнутый отчёт с уровнем критичности (Critical/High/Medium/Low) для каждой проблемы.`;
 
@@ -1364,33 +1633,66 @@ ${files.map(f => `\n=== ${f.path} ===\n${f.content}`).join('\n\n')}
 // ИНТЕРАКТИВНЫЙ РЕЖИМ
 // ═══════════════════════════════════════════════════════════════════════
 
+// Список команд для автодополнения
+const COMMAND_COMPLETIONS = [
+    '/help',
+    '/h',
+    '/?',
+    '/clear',
+    '/c',
+    '/model',
+    '/models',
+    '/refresh-models',
+    '/history',
+    '/tokens',
+    '/save',
+    '/load',
+    '/cache',
+    '/export',
+    '/config',
+    '/exit',
+    '/quit',
+    '/q',
+];
+
+// Функция автодополнения для readline
+function commandCompleter(line) {
+    const hits = COMMAND_COMPLETIONS.filter((c) => c.startsWith(line));
+    return [hits.length ? hits : COMMAND_COMPLETIONS, line];
+}
+
 async function interactiveMode() {
     // Автосохранение истории при выходе
     process.on('exit', () => {
         saveChatHistory(conversationHistory);
     });
-    
+
     process.on('SIGINT', () => {
         saveChatHistory(conversationHistory);
         console.log('\n\n👋 До свидания!\n');
         process.exit(0);
     });
 
-    console.log(chalk.cyan(`
+    console.log(
+        chalk.cyan(`
 ╔═══════════════════════════════════════════════════════════╗
 ║              🤖 z.ai CLI - Интерактивный чат              ║
-║                   Модель: GLM-${currentModel.padEnd(12)}           ║
+║                   Модель: ${currentModel.padEnd(22)}           ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Введите ${chalk.green('/help')} для списка команд, ${chalk.green('/exit')} для выхода${chalk.cyan('        ║')}
 ║  История автоматически сохраняется между сессиями         ║
 ║  ${chalk.green('Streaming:')} ${chalk.yellow(userConfig.streaming !== false ? 'включён' : 'выключен')}                                    ║
+║  ${chalk.green('Tab')} для автодополнения команд                    ║
 ╚═══════════════════════════════════════════════════════════╝
-`));
+`)
+    );
 
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
-        prompt: '👤 Вы > '
+        prompt: '👤 Вы > ',
+        completer: commandCompleter,
+        historySize: 100,
     });
 
     rl.prompt();
@@ -1433,16 +1735,28 @@ async function interactiveMode() {
                     break;
 
                 case '/models':
-                    console.log(`
-Доступные модели:
-  • glm-4         → Флагманская (универсальная)
-  • glm-4-flash   → Быстрая и лёгкая
-  • glm-4-air     → Сбалансированная
-  • glm-3-turbo   → Экономичная
-  • glm-4v        → С поддержкой изображений
-  • character-003 → Ролевые сценарии
+                    console.log('\n📋 Загрузка списка моделей...\n');
+                    fetchAvailableModels().then((models) => {
+                        console.log('📋 Доступные модели:\n');
+                        models.forEach((m) => {
+                            const current = m.id === currentModel ? chalk.green('● ') : '  ';
+                            console.log(
+                                `${current}${chalk.cyan(m.id.padEnd(20))} — ${m.description}`
+                            );
+                        });
+                        console.log('');
+                    });
+                    break;
 
-`);
+                case '/refresh-models':
+                    console.log('\n🔄 Обновление списка моделей...\n');
+                    fetchAvailableModels().then((models) => {
+                        console.log(`✅ Загружено ${models.length} моделей\n`);
+                        models.forEach((m) => {
+                            console.log(`  • ${m.id}`);
+                        });
+                        console.log('');
+                    });
                     break;
 
                 case '/history':
@@ -1452,7 +1766,9 @@ async function interactiveMode() {
                         console.log('\n📜 История диалога:\n');
                         conversationHistory.forEach((msg, i) => {
                             const role = msg.role === 'user' ? '👤 Вы' : '🤖 AI';
-                            console.log(`${i + 1}. ${role}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}\n`);
+                            console.log(
+                                `${i + 1}. ${role}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}\n`
+                            );
                         });
                     }
                     break;
@@ -1463,10 +1779,12 @@ async function interactiveMode() {
                     } else {
                         const filename = cmdArgs[0];
                         const filepath = path.join(__dirname, filename);
-                        const content = conversationHistory.map((msg, i) => {
-                            const role = msg.role === 'user' ? 'Вы' : 'AI';
-                            return `[${i + 1}] ${role}: ${msg.content}`;
-                        }).join('\n\n');
+                        const content = conversationHistory
+                            .map((msg, i) => {
+                                const role = msg.role === 'user' ? 'Вы' : 'AI';
+                                return `[${i + 1}] ${role}: ${msg.content}`;
+                            })
+                            .join('\n\n');
                         fs.writeFileSync(filepath, content, 'utf8');
                         console.log(`💾 История сохранена в: ${filepath}\n`);
                     }
@@ -1481,17 +1799,19 @@ async function interactiveMode() {
                         if (fs.existsSync(filepath)) {
                             const content = fs.readFileSync(filepath, 'utf8');
                             const lines = content.split('\n\n');
-                            // eslint-disable-next-line no-shadow
-                            conversationHistory = lines.map(line => {
-                                const match = line.match(/^\[\d+\] (Вы|AI): (.*)/s);
-                                if (match) {
-                                    return {
-                                        role: match[1] === 'Вы' ? 'user' : 'assistant',
-                                        content: match[2]
-                                    };
-                                }
-                                return null;
-                            }).filter(Boolean);
+
+                            conversationHistory = lines
+                                .map((lineItem) => {
+                                    const match = lineItem.match(/^\[\d+\] (Вы|AI): (.*)/s);
+                                    if (match) {
+                                        return {
+                                            role: match[1] === 'Вы' ? 'user' : 'assistant',
+                                            content: match[2],
+                                        };
+                                    }
+                                    return null;
+                                })
+                                .filter(Boolean);
                             console.log(`💾 История загружена из: ${filepath}\n`);
                         } else {
                             console.log(`❌ Файл не найден: ${filepath}\n`);
@@ -1511,9 +1831,9 @@ async function interactiveMode() {
                         const filename = cmdArgs[0];
                         const format = (cmdArgs[1] || 'md').toLowerCase();
                         const filepath = path.join(__dirname, filename);
-                        
+
                         let content = '';
-                        
+
                         if (format === 'md' || format === 'markdown') {
                             content = '# Диалог с z.ai CLI\n\n';
                             content += `*Дата экспорта: ${new Date().toLocaleString('ru-RU')}*\n\n`;
@@ -1567,39 +1887,74 @@ async function interactiveMode() {
 </html>`;
                         } else {
                             // txt формат
-                            content = conversationHistory.map((msg, i) => {
-                                const role = msg.role === 'user' ? 'Вы' : 'AI';
-                                return `[${i + 1}] ${role}: ${msg.content}`;
-                            }).join('\n\n');
+                            content = conversationHistory
+                                .map((msg, i) => {
+                                    const role = msg.role === 'user' ? 'Вы' : 'AI';
+                                    return `[${i + 1}] ${role}: ${msg.content}`;
+                                })
+                                .join('\n\n');
                         }
-                        
+
                         fs.writeFileSync(filepath, content, 'utf8');
                         console.log(chalk.green(`💾 Диалог экспортирован в: ${filepath}\n`));
                     }
                     break;
 
+                case '/tokens': {
+                    const totalTokens = countHistoryTokens(conversationHistory);
+                    const userTokens = countHistoryTokens(
+                        conversationHistory.filter((m) => m.role === 'user')
+                    );
+                    const aiTokens = countHistoryTokens(
+                        conversationHistory.filter((m) => m.role === 'assistant')
+                    );
+                    console.log(chalk.cyan('\n📊 Статистика токенов:\n'));
+                    console.log(
+                        `  👤 Ваши сообщения: ${chalk.yellow(userTokens.toLocaleString())} токенов`
+                    );
+                    console.log(
+                        `  🤖 Ответы AI: ${chalk.yellow(aiTokens.toLocaleString())} токенов`
+                    );
+                    console.log(`  📈 Всего: ${chalk.green(totalTokens.toLocaleString())} токенов`);
+                    console.log(`  💬 Сообщений: ${chalk.cyan(conversationHistory.length)}\n`);
+                    break;
+                }
+
                 case '/config':
                     console.log(chalk.cyan('\n⚙️ Конфигурация z.ai CLI:\n'));
-                    console.log(chalk.gray('Файл конфигурации: ') + chalk.yellow(CONFIG.CONFIG_FILE));
-                    console.log(chalk.gray('Существует: ') + (fs.existsSync(CONFIG.CONFIG_FILE) ? chalk.green('да') : chalk.red('нет')));
+                    console.log(
+                        chalk.gray('Файл конфигурации: ') + chalk.yellow(CONFIG.CONFIG_FILE)
+                    );
+                    console.log(
+                        chalk.gray('Существует: ') +
+                            (fs.existsSync(CONFIG.CONFIG_FILE)
+                                ? chalk.green('да')
+                                : chalk.red('нет'))
+                    );
                     console.log('');
-                    
+
                     if (Object.keys(userConfig).length > 0) {
                         console.log(chalk.gray('Текущие настройки:\n'));
                         Object.entries(userConfig).forEach(([key, value]) => {
-                            console.log(`  ${chalk.cyan(key)}: ${chalk.yellow(JSON.stringify(value))}`);
+                            console.log(
+                                `  ${chalk.cyan(key)}: ${chalk.yellow(JSON.stringify(value))}`
+                            );
                         });
                     } else {
                         console.log(chalk.gray('Используются настройки по умолчанию.\n'));
-                        console.log(chalk.gray('Создайте файл zai.config.json для кастомизации:\n'));
-                        console.log(chalk.green(`  {
-    "model": "glm-4",
+                        console.log(
+                            chalk.gray('Создайте файл zai.config.json для кастомизации:\n')
+                        );
+                        console.log(
+                            chalk.green(`  {
+    "model": "glm-5",
     "streaming": true,
     "theme": "dark",
     "exclude": ["node_modules", ".git"],
     "maxFiles": 50,
     "autoSaveHistory": true
-  }\n`));
+  }\n`)
+                        );
                     }
                     console.log('');
                     break;
@@ -1635,12 +1990,20 @@ async function interactiveMode() {
             if (useStreaming) {
                 process.stdout.write('🤖 AI > ');
                 let fullAnswer = '';
+                let loadingDots = 0;
+                const loadingInterval = setInterval(() => {
+                    loadingDots = (loadingDots + 1) % 4;
+                    process.stdout.write('\r\u001b[K🤖 AI' + '.'.repeat(loadingDots));
+                }, 300);
 
                 for await (const chunk of chatStream(conversationHistory, currentModel)) {
+                    clearInterval(loadingInterval);
+                    process.stdout.write('\r\u001b[K🤖 AI > ');
                     fullAnswer += chunk;
                     process.stdout.write(chalk.green(chunk));
                 }
 
+                clearInterval(loadingInterval);
                 console.log('\n');
                 conversationHistory.push({ role: 'assistant', content: fullAnswer });
                 saveChatHistoryDebounced(conversationHistory);
@@ -1679,11 +2042,23 @@ async function singleMode(message, model) {
 
         if (useStreaming) {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
+            let loadingDots = 0;
+            const loadingInterval = setInterval(() => {
+                loadingDots = (loadingDots + 1) % 4;
+                process.stdout.write('\r\u001b[K' + '.'.repeat(loadingDots));
+            }, 300);
 
+            let firstChunk = true;
             for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
+                if (firstChunk) {
+                    clearInterval(loadingInterval);
+                    process.stdout.write('\r\u001b[K');
+                    firstChunk = false;
+                }
                 process.stdout.write(chalk.green(chunk));
             }
 
+            clearInterval(loadingInterval);
             console.log('\n');
         } else {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));

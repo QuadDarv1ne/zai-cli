@@ -1,16 +1,11 @@
 {
-  "model": "glm-4",
+  "model": "glm-5",
   "streaming": true,
   "theme": "dark",
-  "exclude": [
-    "node_modules",
-    ".git",
-    "dist",
-    "build",
-    "__pycache__"
-  ],
+  "exclude": ["node_modules", ".git", "dist", "build"],
   "maxFiles": 50,
-  "maxTotalSize": 500000,
   "autoSaveHistory": true,
-  "maxHistoryMessages": 100
+  "timeout": 120000,
+  "maxRetries": 3,
+  "retryDelay": 3000
 }

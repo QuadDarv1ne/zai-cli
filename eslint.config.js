@@ -32,19 +32,19 @@ module.exports = [
                 beforeEach: 'readonly',
                 afterEach: 'readonly',
                 beforeAll: 'readonly',
-                afterAll: 'readonly'
-            }
+                afterAll: 'readonly',
+            },
         },
         rules: {
             'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
             'no-console': 'off',
             'prefer-const': 'error',
             'no-var': 'error',
-            'eqeqeq': ['error', 'always'],
-            'curly': ['error', 'all'],
+            eqeqeq: ['error', 'always'],
+            curly: ['error', 'all'],
             'no-undef': 'error',
             'no-shadow': 'warn',
-            'no-use-before-define': ['error', { functions: false }]
+            'no-use-before-define': ['error', { functions: false }],
         },
         ignores: [
             'node_modules/',
@@ -61,7 +61,7 @@ module.exports = [
             'go/',
             'rust/',
             'cli/',
-            'telegram-bot/'
-        ]
-    }
+            'telegram-bot/',
+        ],
+    },
 ];
