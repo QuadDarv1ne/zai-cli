@@ -524,7 +524,7 @@ function validateMessages(messages) {
     }
 }
 
-async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = false) {
+async function chat(messages, model = 'glm-5', systemPrompt = null, streaming = false) {
     validateMessages(messages);
 
     const requestId = generateRequestId();
@@ -566,7 +566,7 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
 // STREAMING ФУНКЦИЯ (потоковая передача ответов)
 // ═══════════════════════════════════════════════════════════════════════
 
-async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
+async function* chatStream(messages, model = 'glm-5', systemPrompt = null) {
     validateMessages(messages);
 
     const requestId = generateRequestId();
