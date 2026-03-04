@@ -7,12 +7,11 @@ const {
     validateMessages,
     countTokens,
     truncateText,
-    formatFileSize
+    formatFileSize,
 } = require('../lib/utils');
 const path = require('path');
 
 describe('z.ai CLI - Утилиты', () => {
-
     describe('validateApiKey', () => {
         test('должен принимать валидный ключ', () => {
             const result = validateApiKey('abc123def456ghi789.xyz789');
@@ -149,7 +148,9 @@ describe('z.ai CLI - Commander CLI', () => {
         program
             .allowExcessArguments()
             .option('-m, --model <name>', 'Модель', 'glm-4')
-            .action((options) => { capturedOptions = options; })
+            .action((options) => {
+                capturedOptions = options;
+            })
             .parse(['node', 'test', '-m', 'glm-4-flash'], { from: 'user' });
         expect(capturedOptions.model).toBe('glm-4-flash');
     });
@@ -160,7 +161,9 @@ describe('z.ai CLI - Commander CLI', () => {
         program
             .allowExcessArguments()
             .option('-c, --create <description>', 'Создать проект')
-            .action((options) => { capturedOptions = options; })
+            .action((options) => {
+                capturedOptions = options;
+            })
             .parse(['node', 'test', '--create', 'Telegram bot'], { from: 'user' });
         expect(capturedOptions.create).toBe('Telegram bot');
     });
@@ -171,7 +174,9 @@ describe('z.ai CLI - Commander CLI', () => {
         program
             .allowExcessArguments()
             .option('-i, --init <template>', 'Инициализировать шаблон')
-            .action((options) => { capturedOptions = options; })
+            .action((options) => {
+                capturedOptions = options;
+            })
             .parse(['node', 'test', '--init', 'react'], { from: 'user' });
         expect(capturedOptions.init).toBe('react');
     });
@@ -182,7 +187,9 @@ describe('z.ai CLI - Commander CLI', () => {
         program
             .allowExcessArguments()
             .option('-a, --analyze <path>', 'Анализ кода')
-            .action((options) => { capturedOptions = options; })
+            .action((options) => {
+                capturedOptions = options;
+            })
             .parse(['node', 'test', '--analyze', './src'], { from: 'user' });
         expect(capturedOptions.analyze).toBe('./src');
     });
@@ -193,7 +200,9 @@ describe('z.ai CLI - Commander CLI', () => {
         program
             .allowExcessArguments()
             .option('-r, --refactor <file>', 'Рефакторинг файла')
-            .action((options) => { capturedOptions = options; })
+            .action((options) => {
+                capturedOptions = options;
+            })
             .parse(['node', 'test', '--refactor', 'src/app.js'], { from: 'user' });
         expect(capturedOptions.refactor).toBe('src/app.js');
     });
@@ -220,19 +229,19 @@ describe('z.ai CLI - Парсинг аргументов', () => {
 
 describe('z.ai CLI - Шаблоны', () => {
     const TEMPLATES = {
-        'node': { name: 'Node.js проект', files: [] },
-        'python': { name: 'Python проект', files: [] },
-        'react': { name: 'React проект', files: [] },
-        'vue': { name: 'Vue 3 проект', files: [] },
-        'flask': { name: 'Flask приложение', files: [] },
-        'express': { name: 'Express.js API', files: [] },
+        node: { name: 'Node.js проект', files: [] },
+        python: { name: 'Python проект', files: [] },
+        react: { name: 'React проект', files: [] },
+        vue: { name: 'Vue 3 проект', files: [] },
+        flask: { name: 'Flask приложение', files: [] },
+        express: { name: 'Express.js API', files: [] },
         'telegram-bot': { name: 'Telegram бот (Python)', files: [] },
-        'cli': { name: 'CLI утилита (Node.js)', files: [] },
-        'nextjs': { name: 'Next.js 14 проект', files: [] },
-        'fastapi': { name: 'FastAPI проект', files: [] },
-        'django': { name: 'Django проект', files: [] },
-        'go': { name: 'Go проект', files: [] },
-        'rust': { name: 'Rust проект', files: [] }
+        cli: { name: 'CLI утилита (Node.js)', files: [] },
+        nextjs: { name: 'Next.js 14 проект', files: [] },
+        fastapi: { name: 'FastAPI проект', files: [] },
+        django: { name: 'Django проект', files: [] },
+        go: { name: 'Go проект', files: [] },
+        rust: { name: 'Rust проект', files: [] },
     };
 
     test('должен содержать все шаблоны', () => {
@@ -240,7 +249,7 @@ describe('z.ai CLI - Шаблоны', () => {
     });
 
     test('каждый шаблон должен иметь name и files', () => {
-        Object.values(TEMPLATES).forEach(template => {
+        Object.values(TEMPLATES).forEach((template) => {
             expect(template).toHaveProperty('name');
             expect(template).toHaveProperty('files');
         });
@@ -249,22 +258,22 @@ describe('z.ai CLI - Шаблоны', () => {
 
 describe('z.ai CLI - Конфигурация', () => {
     const CONFIG = {
-        TIMEOUT: 60000,
+        TIMEOUT: 120000,
         MAX_RETRIES: 3,
-        RETRY_DELAY: 1000,
-        MAX_HISTORY_MESSAGES: 100
+        RETRY_DELAY: 3000,
+        MAX_HISTORY_MESSAGES: 100,
     };
 
-    test('TIMEOUT должен быть 60 секунд', () => {
-        expect(CONFIG.TIMEOUT).toBe(60000);
+    test('TIMEOUT должен быть 120 секунд', () => {
+        expect(CONFIG.TIMEOUT).toBe(120000);
     });
 
     test('MAX_RETRIES должен быть 3', () => {
         expect(CONFIG.MAX_RETRIES).toBe(3);
     });
 
-    test('RETRY_DELAY должен быть 1000ms', () => {
-        expect(CONFIG.RETRY_DELAY).toBe(1000);
+    test('RETRY_DELAY должен быть 3000ms', () => {
+        expect(CONFIG.RETRY_DELAY).toBe(3000);
     });
 
     test('MAX_HISTORY_MESSAGES должен быть 100', () => {
@@ -292,7 +301,7 @@ describe('z.ai CLI - validateMessages', () => {
     test('должен принимать валидные сообщения', () => {
         const messages = [
             { role: 'user', content: 'Hello' },
-            { role: 'assistant', content: 'Hi there' }
+            { role: 'assistant', content: 'Hi there' },
         ];
         expect(() => validateMessages(messages)).not.toThrow();
     });
