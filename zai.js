@@ -494,10 +494,18 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let chunkTimeout = null;
 
     try {
         while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await Promise.race([
+                reader.read(),
+                new Promise((_, reject) => {
+                    chunkTimeout = setTimeout(() => reject(new Error('Таймаут получения данных')), 30000);
+                })
+            ]);
+            clearTimeout(chunkTimeout);
+
             if (done) {break;}
 
             buffer += decoder.decode(value, { stream: true });
@@ -521,7 +529,14 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
                 }
             }
         }
+    } catch (error) {
+        if (chunkTimeout) {clearTimeout(chunkTimeout);}
+        if (error.message === 'Таймаут получения данных') {
+            throw new Error('Превышено время ожидания ответа от сервера (30с)', { cause: error });
+        }
+        throw error;
     } finally {
+        if (chunkTimeout) {clearTimeout(chunkTimeout);}
         reader.releaseLock();
     }
 }
