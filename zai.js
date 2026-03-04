@@ -156,15 +156,15 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                
+
                 // 401 - неверный ключ
                 if (response.status === 401) {
                     throw new Error('Неверный API ключ (401). Проверьте .env файл.');
                 }
-                
-                // 429 - rate limit
+
+                // 429 - rate limit с экспоненциальным backoff
                 if (response.status === 429) {
-                    const retryAfter = response.headers.get('Retry-After') || 5;
+                    const retryAfter = response.headers.get('Retry-After') || (attempt * 2);
                     console.log(`\n⏳ Rate limit. Ожидание ${retryAfter}с...\n`);
                     await sleep(retryAfter * 1000);
                     continue;
@@ -178,15 +178,16 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
         } catch (error) {
             lastError = error;
 
-            // Не ретраим ошибки аутентификации
-            if (error.message.includes('401')) {
+            // Не ретраим ошибки аутентификации и таймауты
+            if (error.message.includes('401') || error.message.includes('Таймаут')) {
                 throw error;
             }
 
             if (attempt < retries) {
+                const delay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1); // Экспоненциальный backoff
                 console.log(`\n⚠️ Ошибка: ${error.message}`);
-                console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${CONFIG.RETRY_DELAY / 1000}с...\n`);
-                await sleep(CONFIG.RETRY_DELAY * attempt); // Экспоненциальная задержка
+                console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${delay / 1000}с...\n`);
+                await sleep(delay);
             }
         }
     }
@@ -473,34 +474,52 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
 // ЧТЕНИЕ ФАЙЛОВ
 // ═══════════════════════════════════════════════════════════════════════
 
+// Кэш для чтения файлов
+const fileCache = new Map();
+
 function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
     const result = [];
     let totalSize = 0;
-    
+    const CODE_EXTENSIONS = new Set([
+        '.js', '.ts', '.py', '.php', '.java', '.cpp', '.c', '.h',
+        '.cs', '.rb', '.go', '.rs', '.swift', '.kt', '.vue',
+        '.jsx', '.tsx', '.html', '.css', '.scss', '.json',
+        '.yaml', '.yml', '.md', '.txt', '.sql', '.sh', '.bat'
+    ]);
+
     function walk(currentDir) {
         if (result.length >= maxFiles) {return;}
-        
+
         try {
             const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-            
+
             for (const entry of entries) {
                 if (entry.name.startsWith('.') || entry.name === 'node_modules') {continue;}
-                
+
                 const fullPath = path.join(currentDir, entry.name);
-                
+
                 if (entry.isDirectory()) {
                     walk(fullPath);
                 } else if (entry.isFile()) {
                     const ext = path.extname(entry.name).toLowerCase();
-                    const codeExtensions = ['.js', '.ts', '.py', '.php', '.java', '.cpp', '.c', '.h', 
-                                           '.cs', '.rb', '.go', '.rs', '.swift', '.kt', '.vue', 
-                                           '.jsx', '.tsx', '.html', '.css', '.scss', '.json', 
-                                           '.yaml', '.yml', '.md', '.txt', '.sql', '.sh', '.bat'];
-                    
-                    if (codeExtensions.includes(ext) || !ext) {
+
+                    if (CODE_EXTENSIONS.has(ext) || !ext) {
                         try {
+                            // Проверка кэша
+                            if (fileCache.has(fullPath)) {
+                                const cachedContent = fileCache.get(fullPath);
+                                if (totalSize + cachedContent.length <= maxTotalSize) {
+                                    result.push({ path: fullPath, content: cachedContent });
+                                    totalSize += cachedContent.length;
+                                } else {
+                                    return;
+                                }
+                                continue;
+                            }
+
                             const content = fs.readFileSync(fullPath, 'utf8');
                             if (totalSize + content.length <= maxTotalSize) {
+                                fileCache.set(fullPath, content); // Кэшируем
                                 result.push({ path: fullPath, content });
                                 totalSize += content.length;
                             } else {
@@ -516,21 +535,32 @@ function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
             // Игнорируем ошибки доступа
         }
     }
-    
+
     walk(dir);
     return result;
 }
 
 function getFileContent(filePath) {
     const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
-    
+
     if (!fs.existsSync(absolutePath)) {
         throw new Error(`Файл не найден: ${absolutePath}`);
     }
-    
+
+    // Проверка кэша
+    if (fileCache.has(absolutePath)) {
+        return {
+            path: absolutePath,
+            content: fileCache.get(absolutePath)
+        };
+    }
+
+    const content = fs.readFileSync(absolutePath, 'utf8');
+    fileCache.set(absolutePath, content); // Кэшируем
+
     return {
         path: absolutePath,
-        content: fs.readFileSync(absolutePath, 'utf8')
+        content
     };
 }
 
