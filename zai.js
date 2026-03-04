@@ -123,6 +123,14 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function debounce(fn, delay) {
+    let timeoutId;
+    return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // HTTP КЛИЕНТ С ТАЙМАУТОМ И РЕТРАЯМИ
 // ═══════════════════════════════════════════════════════════════════════
@@ -256,6 +264,15 @@ function loadChatHistory() {
     }
     return [];
 }
+
+const saveChatHistoryDebounced = debounce((history) => {
+    try {
+        const trimmed = history.slice(-CONFIG.MAX_HISTORY_MESSAGES);
+        fs.writeFileSync(CONFIG.HISTORY_FILE, JSON.stringify(trimmed, null, 2), 'utf8');
+    } catch {
+        // Игнорируем ошибки
+    }
+}, 500);
 
 function saveChatHistory(history) {
     try {
@@ -1574,31 +1591,30 @@ async function interactiveMode() {
         }
 
         conversationHistory.push({ role: 'user', content: input });
-        saveChatHistory(conversationHistory);
+        saveChatHistoryDebounced(conversationHistory);
 
         try {
-            const useStreaming = userConfig.streaming !== false; // По умолчанию true
-            
+            const useStreaming = userConfig.streaming !== false;
+
             if (useStreaming) {
                 process.stdout.write('🤖 AI > ');
                 let fullAnswer = '';
-                
-                // Используем streaming
+
                 for await (const chunk of chatStream(conversationHistory, currentModel)) {
                     fullAnswer += chunk;
                     process.stdout.write(chalk.green(chunk));
                 }
-                
+
                 console.log('\n');
                 conversationHistory.push({ role: 'assistant', content: fullAnswer });
-                saveChatHistory(conversationHistory);
+                saveChatHistoryDebounced(conversationHistory);
             } else {
                 process.stdout.write('🤖 AI > ');
                 const answer = await chat(conversationHistory, currentModel);
-                
+
                 conversationHistory.push({ role: 'assistant', content: answer });
-                saveChatHistory(conversationHistory);
-                
+                saveChatHistoryDebounced(conversationHistory);
+
                 console.log(highlightSyntax(answer) + '\n');
             }
         } catch (error) {
