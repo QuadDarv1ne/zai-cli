@@ -5,6 +5,8 @@ const path = require('path');
 const readline = require('readline');
 const chalk = require('chalk');
 const { SingleBar } = require('cli-progress');
+const { Command } = require('commander');
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 
 // ═══════════════════════════════════════════════════════════════════════
 // КОНФИГУРАЦИЯ
@@ -52,7 +54,7 @@ function loadConfig() {
         if (fs.existsSync(CONFIG.CONFIG_FILE)) {
             userConfig = JSON.parse(fs.readFileSync(CONFIG.CONFIG_FILE, 'utf8'));
         }
-    } catch (e) {
+    } catch {
         // Игнорируем ошибки
     }
 }
@@ -86,6 +88,34 @@ function validateApiKey() {
 validateApiKey();
 
 // ═══════════════════════════════════════════════════════════════════════
+// ГЛОБАЛЬНАЯ ОБРАБОТКА ОШИБОК
+// ═══════════════════════════════════════════════════════════════════════
+
+process.on('uncaughtException', (err) => {
+    const logFile = path.join(__dirname, '.zai-error.log');
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] Uncaught Exception:\n${err.stack}\n\n`;
+
+    fs.appendFileSync(logFile, logEntry);
+
+    console.error(chalk.red('\n❌ Произошла непредвиденная ошибка'));
+    console.error(chalk.gray('   Лог сохранён в: .zai-error.log\n'));
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    const logFile = path.join(__dirname, '.zai-error.log');
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] Unhandled Rejection:\n${reason}\n\n`;
+
+    fs.appendFileSync(logFile, logEntry);
+
+    console.error(chalk.red('\n❌ Ошибка в асинхронной операции'));
+    console.error(chalk.gray('   Лог сохранён в: .zai-error.log\n'));
+    process.exit(1);
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 // УТИЛИТЫ
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -111,7 +141,7 @@ async function fetchWithTimeout(url, options, timeout = CONFIG.TIMEOUT) {
     } catch (error) {
         clearTimeout(timeoutId);
         if (error.name === 'AbortError') {
-            throw new Error(`Таймаут запроса (${timeout / 1000}с)`);
+            throw new Error(`Таймаут запроса (${timeout / 1000}с)`, { cause: error });
         }
         throw error;
     }
@@ -168,8 +198,8 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 // ПОДСВЕТКА СИНТАКСИСА (с использованием chalk)
 // ═══════════════════════════════════════════════════════════════════════
 
-function highlightSyntax(code, lang = '') {
-    if (!process.stdout.isTTY) return code; // Не красим если не терминал
+function highlightSyntax(code, _lang = '') {
+    if (!process.stdout.isTTY) {return code;} // Не красим если не терминал
 
     let highlighted = code;
 
@@ -220,7 +250,7 @@ function loadChatHistory() {
             const data = fs.readFileSync(CONFIG.HISTORY_FILE, 'utf8');
             return JSON.parse(data);
         }
-    } catch (e) {
+    } catch {
         // Игнорируем ошибки
     }
     return [];
@@ -228,10 +258,9 @@ function loadChatHistory() {
 
 function saveChatHistory(history) {
     try {
-        // Оставляем только последние N сообщений
         const trimmed = history.slice(-CONFIG.MAX_HISTORY_MESSAGES);
         fs.writeFileSync(CONFIG.HISTORY_FILE, JSON.stringify(trimmed, null, 2), 'utf8');
-    } catch (e) {
+    } catch {
         // Игнорируем ошибки
     }
 }
@@ -240,60 +269,114 @@ function saveChatHistory(history) {
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // ═══════════════════════════════════════════════════════════════════════
 
-const args = process.argv.slice(2);
 let conversationHistory = loadChatHistory();
 let currentModel = 'glm-4';
 
 // ═══════════════════════════════════════════════════════════════════════
-// СПРАВКА
+// СПРАВКА ДЛЯ ИНТЕРАКТИВНОГО РЕЖИМА
 // ═══════════════════════════════════════════════════════════════════════
 
-function printHelp() {
+function showInteractiveHelp() {
     console.log(chalk.cyan(`
 ╔═══════════════════════════════════════════════════════════╗
-║                    z.ai CLI - Справка                     ║
-╠═══════════════════════════════════════════════════════════╣
-║  ОСНОВНЫЕ РЕЖИМЫ:                                         ║
-║    node zai.js                    → Интерактивный чат     ║
-║    node zai.js <запрос>           → Одиночный запрос      ║
-║    node zai.js -m <model> <запрос> → С выбором модели     ║
-║                                                           ║
-║  РЕЖИМЫ РАБОТЫ С ПРОЕКТАМИ:                               ║
-║    --create <описание>            → Создать проект/файлы  ║
-║    --init <шаблон>                → Инициализировать шаб- ║
-║                                     лон проекта           ║
-║    --project <задача>             → Работа с текущим      ║
-║                                     проектом              ║
-║    --refactor <файл>              → Рефакторинг файла     ║
-║    --analyze <файл/папка>         → Анализ кода           ║
-║    --explain <файл>               → Объяснить код         ║
-║    --test <файл>                  → Создать тесты         ║
-║    --doc <файл>                   → Создать документацию  ║
-║                                                           ║
-║  КОМАНДЫ В ИНТЕРАКТИВНОМ РЕЖИМЕ:                          ║
-║    /help, /h              → Справка                       ║
+║  КОМАНДЫ ИНТЕРАКТИВНОГО РЕЖИМА:                           ║
+║    /help, /h, /?          → Справка                       ║
 ║    /clear, /c             → Очистить историю              ║
 ║    /model <name>          → Сменить модель                ║
 ║    /models                → Список моделей                ║
 ║    /history               → Показать историю              ║
 ║    /save <file>           → Сохранить историю             ║
 ║    /load <file>           → Загрузить историю             ║
-║    ` + chalk.green.bold(`/export <file> [fmt]   → Экспорт в MD/HTML/TXT`) + chalk.cyan('     ║') + `
-║    ` + chalk.green.bold(`/config                → Показать настройки`) + chalk.cyan('            ║') + `
+║    /export <file> [fmt]   → Экспорт в MD/HTML/TXT         ║
+║    /config                → Показать настройки             ║
 ║    /exit, /quit, /q       → Выход                         ║
-║                                                           ║
-║  ` + chalk.yellow('НОВОЕ:') + chalk.cyan(' Streaming режим для мгновенного вывода ответов') + `
-║                                                           ║
-║  ПРИМЕРЫ:                                                 ║
-║    node zai.js --create "Создай Telegram бота на Python"  ║
-║    node zai.js --init react                               ║
-║    node zai.js --project "Добавь авторизацию"             ║
-║    node zai.js --refactor src/app.js                      ║
-║    node zai.js --analyze ./src                            ║
-║    node zai.js --explain main.py                          ║
 ╚═══════════════════════════════════════════════════════════╝
 `));
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// COMMANDER CLI
+// ═══════════════════════════════════════════════════════════════════════
+
+const program = new Command();
+
+program
+    .name('zai')
+    .description('CLI для работы с z.ai (Zhipu AI / GLM) API')
+    .version(pkg.version)
+    .argument('[query]', 'Запрос к AI')
+    .option('-m, --model <name>', 'Модель', 'glm-4')
+    .option('-c, --create <description>', 'Создать проект по описанию')
+    .option('-i, --init <template>', 'Инициализировать шаблон проекта')
+    .option('-p, --project <task>', 'Работа с текущим проектом')
+    .option('-r, --refactor <file>', 'Рефакторинг файла')
+    .option('-a, --analyze <path>', 'Анализ кода')
+    .option('-e, --explain <file>', 'Объяснить код')
+    .option('-t, --test <file>', 'Создать тесты')
+    .option('-d, --doc <file>', 'Создать документацию')
+    .option('--fix <file>', 'Исправить ошибки в файле')
+    .option('--security [path]', 'Проверка безопасности')
+    .action(async (query, options) => {
+        // Режимы работы
+        if (options.create) {
+            await createProject(options.create);
+            return;
+        }
+
+        if (options.init) {
+            await initTemplate(options.init);
+            return;
+        }
+
+        if (options.project) {
+            await projectMode(options.project);
+            return;
+        }
+
+        if (options.refactor) {
+            await refactorFile(options.refactor);
+            return;
+        }
+
+        if (options.analyze) {
+            await analyzePath(options.analyze);
+            return;
+        }
+
+        if (options.explain) {
+            await explainFile(options.explain);
+            return;
+        }
+
+        if (options.test) {
+            await createTests(options.test);
+            return;
+        }
+
+        if (options.doc) {
+            await createDocs(options.doc);
+            return;
+        }
+
+        if (options.fix) {
+            await fixFile(options.fix);
+            return;
+        }
+
+        if (options.security !== undefined) {
+            await securityAudit(options.security || '.');
+            return;
+        }
+
+        // Одиночный запрос или интерактивный режим
+        if (query) {
+            await singleMode(query, options.model);
+        } else {
+            await interactiveMode();
+        }
+    });
+
+program.parse(process.argv);
 
 // ═══════════════════════════════════════════════════════════════════════
 // CHAT ФУНКЦИЯ С РЕТРАЯМИ
@@ -361,7 +444,7 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
 
     while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {break;}
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -371,14 +454,14 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
             const trimmed = line.trim();
             if (trimmed.startsWith('data: ')) {
                 const data = trimmed.slice(6);
-                if (data === '[DONE]') continue;
+                if (data === '[DONE]') {continue;}
                 try {
                     const parsed = JSON.parse(data);
                     const content = parsed.choices?.[0]?.delta?.content || '';
                     if (content) {
                         yield content;
                     }
-                } catch (e) {
+                } catch {
                     // Пропускаем некорректные данные
                 }
             }
@@ -395,13 +478,13 @@ function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
     let totalSize = 0;
     
     function walk(currentDir) {
-        if (result.length >= maxFiles) return;
+        if (result.length >= maxFiles) {return;}
         
         try {
             const entries = fs.readdirSync(currentDir, { withFileTypes: true });
             
             for (const entry of entries) {
-                if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+                if (entry.name.startsWith('.') || entry.name === 'node_modules') {continue;}
                 
                 const fullPath = path.join(currentDir, entry.name);
                 
@@ -423,13 +506,13 @@ function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
                             } else {
                                 return;
                             }
-                        } catch (e) {
+                        } catch {
                             // Пропускаем бинарные файлы
                         }
                     }
                 }
             }
-        } catch (e) {
+        } catch {
             // Игнорируем ошибки доступа
         }
     }
@@ -867,10 +950,12 @@ async function analyzePath(targetPath) {
         console.error(`❌ Путь не найден: ${absolutePath}\n`);
         return;
     }
-    
+
+    // eslint-disable-next-line no-useless-assignment
     let content = '';
+    // eslint-disable-next-line no-useless-assignment
     let description = '';
-    
+
     if (fs.statSync(absolutePath).isDirectory()) {
         const files = readFilesRecursively(absolutePath);
         content = files.map(f => `=== ${f.path} ===\n${f.content}`).join('\n\n');
@@ -1195,7 +1280,7 @@ async function interactiveMode() {
                 case '/help':
                 case '/h':
                 case '/?':
-                    printHelp();
+                    showInteractiveHelp();
                     break;
 
                 case '/clear':
@@ -1265,6 +1350,7 @@ async function interactiveMode() {
                         if (fs.existsSync(filepath)) {
                             const content = fs.readFileSync(filepath, 'utf8');
                             const lines = content.split('\n\n');
+                            // eslint-disable-next-line no-shadow
                             conversationHistory = lines.map(line => {
                                 const match = line.match(/^\[\d+\] (Вы|AI): (.*)/s);
                                 if (match) {
@@ -1460,16 +1546,14 @@ async function interactiveMode() {
 async function singleMode(message, model) {
     try {
         const useStreaming = userConfig.streaming !== false;
-        
+
         if (useStreaming) {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
-            let fullAnswer = '';
-            
+
             for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
-                fullAnswer += chunk;
                 process.stdout.write(chalk.green(chunk));
             }
-            
+
             console.log('\n');
         } else {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
@@ -1482,157 +1566,3 @@ async function singleMode(message, model) {
         process.exit(1);
     }
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// ГЛАВНАЯ ФУНКЦИЯ
-// ═══════════════════════════════════════════════════════════════════════
-
-async function main() {
-    const flags = {
-        help: args.includes('-h') || args.includes('--help'),
-        version: args.includes('-v') || args.includes('--version'),
-        create: args.indexOf('--create'),
-        init: args.indexOf('--init'),
-        project: args.indexOf('--project'),
-        refactor: args.indexOf('--refactor'),
-        analyze: args.indexOf('--analyze'),
-        explain: args.indexOf('--explain'),
-        test: args.indexOf('--test'),
-        doc: args.indexOf('--doc')
-    };
-
-    if (flags.version) {
-        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-        console.log(chalk.cyan(`\n🤖 z.ai CLI v${pkg.version}`));
-        console.log(chalk.gray(`   Node.js ${process.version}`));
-        console.log(chalk.gray(`   Модель по умолчанию: ${userConfig.model || 'glm-4'}\n`));
-        return;
-    }
-
-    if (flags.help) {
-        printHelp();
-        return;
-    }
-
-    if (flags.create !== -1) {
-        const description = args.slice(flags.create + 1).join(' ');
-        if (!description) {
-            console.error('❌ Укажите описание проекта\n');
-            return;
-        }
-        await createProject(description);
-        return;
-    }
-
-    if (flags.init !== -1) {
-        const templateName = args[flags.init + 1];
-        if (!templateName) {
-            console.error('❌ Укажите название шаблона\n');
-            return;
-        }
-        await initTemplate(templateName);
-        return;
-    }
-
-    if (flags.project !== -1) {
-        const task = args.slice(flags.project + 1).join(' ');
-        if (!task) {
-            console.error('❌ Укажите задачу\n');
-            return;
-        }
-        await projectMode(task);
-        return;
-    }
-
-    if (flags.refactor !== -1) {
-        const filePath = args[flags.refactor + 1];
-        if (!filePath) {
-            console.error('❌ Укажите файл\n');
-            return;
-        }
-        await refactorFile(filePath);
-        return;
-    }
-
-    if (flags.analyze !== -1) {
-        const targetPath = args[flags.analyze + 1];
-        if (!targetPath) {
-            console.error('❌ Укажите путь\n');
-            return;
-        }
-        await analyzePath(targetPath);
-        return;
-    }
-
-    if (flags.explain !== -1) {
-        const filePath = args[flags.explain + 1];
-        if (!filePath) {
-            console.error('❌ Укажите файл\n');
-            return;
-        }
-        await explainFile(filePath);
-        return;
-    }
-
-    if (flags.test !== -1) {
-        const filePath = args[flags.test + 1];
-        if (!filePath) {
-            console.error('❌ Укажите файл\n');
-            return;
-        }
-        await createTests(filePath);
-        return;
-    }
-
-    if (flags.doc !== -1) {
-        const filePath = args[flags.doc + 1];
-        if (!filePath) {
-            console.error('❌ Укажите файл\n');
-            return;
-        }
-        await createDocs(filePath);
-        return;
-    }
-
-    if (flags.fix !== -1) {
-        const filePath = args[flags.fix + 1];
-        if (!filePath) {
-            console.error('❌ Укажите файл\n');
-            return;
-        }
-        await fixFile(filePath);
-        return;
-    }
-
-    if (flags.security !== -1) {
-        const targetPath = args[flags.security + 1] || '.';
-        await securityAudit(targetPath);
-        return;
-    }
-
-    if (args.length === 0) {
-        await interactiveMode();
-        return;
-    }
-
-    let model = 'glm-4';
-    let message = '';
-
-    if (args.includes('-m')) {
-        const modelIndex = args.indexOf('-m');
-        model = args[modelIndex + 1];
-        message = args.slice(modelIndex + 2).join(' ');
-    } else {
-        message = args.join(' ');
-    }
-
-    if (!message) {
-        console.error('❌ Ошибка: не указан запрос');
-        printHelp();
-        process.exit(1);
-    }
-
-    await singleMode(message, model);
-}
-
-main();

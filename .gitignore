@@ -63,3 +63,7 @@ telegram-bot/
 # Конфигурация пользователя
 zai.config.json
 zai.config.json.example
+
+# Логи ошибок
+.zai-error.log
+.zai-error-*.log

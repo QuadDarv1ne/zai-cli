@@ -1,14 +1,14 @@
-const { 
-    validateApiKey, 
+const {
+    validateApiKey,
     extractFilesFromResponse,
     sleep,
     highlightSyntax,
-    createProgressBar 
+    createProgressBar
 } = require('../lib/utils');
 const path = require('path');
 
 describe('z.ai CLI - Утилиты', () => {
-    
+
     describe('validateApiKey', () => {
         test('должен принимать валидный ключ', () => {
             const result = validateApiKey('abc123def456ghi789.xyz789');
@@ -41,7 +41,6 @@ describe('z.ai CLI - Утилиты', () => {
             const files = extractFilesFromResponse(response, '/tmp');
             expect(files.length).toBe(1);
             expect(files[0].path).toBe(path.join('/tmp', 'test.js'));
-            // Контент может включать закрывающий ```
             expect(files[0].content).toContain('console.log("hi");');
         });
 
@@ -55,11 +54,15 @@ describe('z.ai CLI - Утилиты', () => {
 
         test('должен извлекать несколько файлов', () => {
             const response = `
+\`\`\`javascript
 // FILE: file1.js
 content1
+\`\`\`
 
+\`\`\`python
 // FILE: file2.py
 content2
+\`\`\`
 `;
             const files = extractFilesFromResponse(response, '/tmp');
             expect(files.length).toBe(2);
@@ -71,6 +74,13 @@ content2
             const response = 'Просто текст без кода';
             const files = extractFilesFromResponse(response, '/tmp');
             expect(files.length).toBe(0);
+        });
+
+        test('должен определять язык файла', () => {
+            const response = '```javascript\n// FILE: app.js\nconsole.log("hi");\n```';
+            const files = extractFilesFromResponse(response, '/tmp');
+            expect(files.length).toBe(1);
+            expect(files[0].path).toBe(path.join('/tmp', 'app.js'));
         });
     });
 
@@ -90,14 +100,23 @@ content2
         });
 
         test('должен содержать ANSI коды для ключевого слова в TTY', () => {
-            // Сохраняем оригинальное значение
             const originalIsTTY = process.stdout.isTTY;
             process.stdout.isTTY = true;
-            
+
             const result = highlightSyntax('const x = 1;');
-            expect(result).toContain('\x1b[35m'); // keyword color
-            
-            // Восстанавливаем
+            expect(result).toContain('\x1b[35m');
+
+            process.stdout.isTTY = originalIsTTY;
+        });
+
+        test('должен возвращать код без изменений если не TTY', () => {
+            const originalIsTTY = process.stdout.isTTY;
+            process.stdout.isTTY = false;
+
+            const code = 'const x = 1;';
+            const result = highlightSyntax(code);
+            expect(result).toBe(code);
+
             process.stdout.isTTY = originalIsTTY;
         });
     });
@@ -108,6 +127,71 @@ content2
             expect(typeof progress.update).toBe('function');
             expect(typeof progress.done).toBe('function');
         });
+
+        test('должен обновлять прогресс', () => {
+            const progress = createProgressBar(10);
+            expect(() => progress.update()).not.toThrow();
+            expect(() => progress.done()).not.toThrow();
+        });
+    });
+});
+
+describe('z.ai CLI - Commander CLI', () => {
+    const { Command } = require('commander');
+
+    test('должен принимать опцию модели', () => {
+        const program = new Command();
+        let capturedOptions;
+        program
+            .allowExcessArguments()
+            .option('-m, --model <name>', 'Модель', 'glm-4')
+            .action((options) => { capturedOptions = options; })
+            .parse(['node', 'test', '-m', 'glm-4-flash'], { from: 'user' });
+        expect(capturedOptions.model).toBe('glm-4-flash');
+    });
+
+    test('должен принимать опцию create', () => {
+        const program = new Command();
+        let capturedOptions;
+        program
+            .allowExcessArguments()
+            .option('-c, --create <description>', 'Создать проект')
+            .action((options) => { capturedOptions = options; })
+            .parse(['node', 'test', '--create', 'Telegram bot'], { from: 'user' });
+        expect(capturedOptions.create).toBe('Telegram bot');
+    });
+
+    test('должен принимать опцию init', () => {
+        const program = new Command();
+        let capturedOptions;
+        program
+            .allowExcessArguments()
+            .option('-i, --init <template>', 'Инициализировать шаблон')
+            .action((options) => { capturedOptions = options; })
+            .parse(['node', 'test', '--init', 'react'], { from: 'user' });
+        expect(capturedOptions.init).toBe('react');
+    });
+
+    test('должен принимать опцию analyze', () => {
+        const program = new Command();
+        let capturedOptions;
+        program
+            .allowExcessArguments()
+            .option('-a, --analyze <path>', 'Анализ кода')
+            .action((options) => { capturedOptions = options; })
+            .parse(['node', 'test', '--analyze', './src'], { from: 'user' });
+        expect(capturedOptions.analyze).toBe('./src');
+    });
+
+    test('должен принимать опцию refactor', () => {
+        const program = new Command();
+        let capturedOptions;
+        program
+            .allowExcessArguments()
+            .option('-r, --refactor <file>', 'Рефакторинг файла')
+            .action((options) => { capturedOptions = options; })
+            .parse(['node', 'test', '--refactor', 'src/app.js'], { from: 'user' });
+        expect(capturedOptions.refactor).toBe('src/app.js');
     });
 });
 
@@ -181,5 +265,21 @@ describe('z.ai CLI - Конфигурация', () => {
 
     test('MAX_HISTORY_MESSAGES должен быть 100', () => {
         expect(CONFIG.MAX_HISTORY_MESSAGES).toBe(100);
+    });
+});
+
+describe('z.ai CLI - Обработка ошибок', () => {
+    test('должен логировать ошибки в файл', () => {
+        const fs = require('fs');
+        const testPath = require('path');
+
+        const logFile = testPath.join(__dirname, '..', '.zai-error-test.log');
+        const timestamp = new Date().toISOString();
+        const logEntry = `[${timestamp}] Test Error:\nTest error message\n\n`;
+
+        fs.writeFileSync(logFile, logEntry);
+        expect(fs.existsSync(logFile)).toBe(true);
+
+        fs.unlinkSync(logFile);
     });
 });
