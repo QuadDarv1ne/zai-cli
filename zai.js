@@ -164,6 +164,11 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
+            // Проверка сетевого подключения перед запросом
+            if (!globalThis.navigator?.onLine && typeof globalThis.navigator !== 'undefined') {
+                throw new Error('Отсутствует сетевое подключение');
+            }
+
             const response = await fetchWithTimeout(url, options);
 
             if (!response.ok) {
@@ -191,12 +196,12 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
             lastError = error;
 
             // Не ретраим ошибки аутентификации и таймауты
-            if (error.message.includes('401') || error.message.includes('Таймаут')) {
+            if (error.message.includes('401') || error.message.includes('Таймаут') || error.message.includes('сетевое')) {
                 throw error;
             }
 
             if (attempt < retries) {
-                const delay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1); // Экспоненциальный backoff
+                const delay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1);
                 console.log(`\n⚠️ Ошибка: ${error.message}`);
                 console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${delay / 1000}с...\n`);
                 await sleep(delay);
