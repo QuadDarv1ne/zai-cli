@@ -33,9 +33,15 @@ module.exports = [
                 afterEach: 'readonly',
                 beforeAll: 'readonly',
                 afterAll: 'readonly',
+                it: 'readonly',
+                fs: 'readonly',
+                path: 'readonly',
+                readline: 'readonly',
+                chalk: 'readonly',
             },
         },
         rules: {
+            // Основные правила
             'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
             'no-console': 'off',
             'prefer-const': 'error',
@@ -45,6 +51,34 @@ module.exports = [
             'no-undef': 'error',
             'no-shadow': 'warn',
             'no-use-before-define': ['error', { functions: false }],
+            
+            // Дополнительные правила для качества кода
+            'no-return-await': 'error',
+            'require-await': 'warn',
+            'no-promise-executor-return': 'error',
+            
+            // Стиль кода
+            'prefer-arrow-callback': ['warn', { allowNamedFunctions: true }],
+            'arrow-spacing': ['error', { before: true, after: true }],
+            'comma-dangle': 'off', // Слишком строгое
+            'object-curly-spacing': ['error', 'always'],
+            'array-bracket-spacing': ['error', 'never'],
+            'quotes': ['error', 'single', { avoidEscape: true }],
+            'semi': ['error', 'always'],
+            'indent': ['error', 4, { SwitchCase: 1 }],
+            
+            // Предотвращение ошибок
+            'no-empty': 'warn',
+            'no-eval': 'error',
+            'no-implied-eval': 'error',
+            'no-new-func': 'error',
+            'no-script-url': 'error',
+            'no-proto': 'error',
+            'no-useless-escape': 'warn',
+            
+            // Ограничения - ослаблены для гибкости
+            'max-len': 'off',
+            'max-depth': 'off',
         },
         ignores: [
             'node_modules/',
@@ -62,6 +96,7 @@ module.exports = [
             'rust/',
             'cli/',
             'telegram-bot/',
+            '__tests__/temp/',
         ],
     },
 ];
