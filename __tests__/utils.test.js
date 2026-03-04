@@ -5,7 +5,8 @@ const {
     highlightSyntax,
     createProgressBar,
     validateMessages,
-    countTokens
+    countTokens,
+    truncateText
 } = require('../lib/utils');
 const path = require('path');
 
@@ -345,5 +346,27 @@ describe('z.ai CLI - countTokens', () => {
     test('должен округлять вверх', () => {
         expect(countTokens('abc')).toBe(1);
         expect(countTokens('abcde')).toBe(2);
+    });
+});
+
+describe('z.ai CLI - truncateText', () => {
+    test('должен обрезать длинный текст', () => {
+        expect(truncateText('Hello World', 8)).toBe('Hello...');
+    });
+
+    test('не должен обрезать короткий текст', () => {
+        expect(truncateText('Hi', 10)).toBe('Hi');
+    });
+
+    test('должен возвращать пустую строку для null', () => {
+        expect(truncateText(null, 10)).toBe('');
+    });
+
+    test('должен возвращать пустую строку для undefined', () => {
+        expect(truncateText(undefined, 10)).toBe('');
+    });
+
+    test('должен возвращать текст точно по границе', () => {
+        expect(truncateText('Hello', 5)).toBe('Hello');
     });
 });
