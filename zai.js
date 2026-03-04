@@ -1981,7 +1981,7 @@ async function interactiveMode() {
             return;
         }
 
-        conversationHistory.push({ role: 'user', content: input });
+        const userInput = { role: 'user', content: input };
 
         try {
             const useStreaming = userConfig.streaming !== false;
@@ -1996,7 +1996,10 @@ async function interactiveMode() {
                 }, 300);
 
                 try {
-                    for await (const chunk of chatStream(conversationHistory, currentModel)) {
+                    for await (const chunk of chatStream(
+                        [...conversationHistory, userInput],
+                        currentModel
+                    )) {
                         clearInterval(loadingInterval);
                         process.stdout.write('\r\u001b[K🤖 AI > ');
                         fullAnswer += chunk;
@@ -2007,11 +2010,16 @@ async function interactiveMode() {
                 }
 
                 console.log('\n');
+                conversationHistory.push(userInput);
                 conversationHistory.push({ role: 'assistant', content: fullAnswer });
             } else {
                 process.stdout.write('🤖 AI > ');
-                const answer = await chat(conversationHistory, currentModel);
+                const answer = await chat(
+                    [...conversationHistory, userInput],
+                    currentModel
+                );
 
+                conversationHistory.push(userInput);
                 conversationHistory.push({ role: 'assistant', content: answer });
 
                 console.log(highlightSyntax(answer) + '\n');
@@ -2020,8 +2028,6 @@ async function interactiveMode() {
             saveChatHistoryDebounced(conversationHistory);
         } catch (error) {
             console.error(`\n❌ Ошибка: ${error.message}\n`);
-            conversationHistory.pop();
-            saveChatHistory(conversationHistory);
         }
 
         rl.prompt();
