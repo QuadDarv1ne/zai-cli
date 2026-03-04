@@ -1,0 +1,67 @@
+const js = require('@eslint/js');
+
+module.exports = [
+    js.configs.recommended,
+    {
+        languageOptions: {
+            ecmaVersion: 'latest',
+            sourceType: 'commonjs',
+            globals: {
+                node: 'readonly',
+                process: 'readonly',
+                console: 'readonly',
+                Buffer: 'readonly',
+                __dirname: 'readonly',
+                __filename: 'readonly',
+                exports: 'readonly',
+                module: 'readonly',
+                require: 'readonly',
+                setInterval: 'readonly',
+                clearInterval: 'readonly',
+                setTimeout: 'readonly',
+                clearTimeout: 'readonly',
+                fetch: 'readonly',
+                AbortController: 'readonly',
+                TextDecoder: 'readonly',
+                TextEncoder: 'readonly',
+                ReadableStream: 'readonly',
+                jest: 'readonly',
+                describe: 'readonly',
+                test: 'readonly',
+                expect: 'readonly',
+                beforeEach: 'readonly',
+                afterEach: 'readonly',
+                beforeAll: 'readonly',
+                afterAll: 'readonly'
+            }
+        },
+        rules: {
+            'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+            'no-console': 'off',
+            'prefer-const': 'error',
+            'no-var': 'error',
+            'eqeqeq': ['error', 'always'],
+            'curly': ['error', 'all'],
+            'no-undef': 'error',
+            'no-shadow': 'warn',
+            'no-use-before-define': ['error', { functions: false }]
+        },
+        ignores: [
+            'node_modules/',
+            'coverage/',
+            'generated-project/',
+            'express/',
+            'python/',
+            'react/',
+            'vue/',
+            'flask/',
+            'nextjs/',
+            'fastapi/',
+            'django/',
+            'go/',
+            'rust/',
+            'cli/',
+            'telegram-bot/'
+        ]
+    }
+];
