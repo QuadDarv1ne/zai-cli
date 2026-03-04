@@ -288,6 +288,7 @@ function showInteractiveHelp() {
 ║    /history               → Показать историю              ║
 ║    /save <file>           → Сохранить историю             ║
 ║    /load <file>           → Загрузить историю             ║
+║    /cache                 → Очистить кэш файлов           ║
 ║    /export <file> [fmt]   → Экспорт в MD/HTML/TXT         ║
 ║    /config                → Показать настройки             ║
 ║    /exit, /quit, /q       → Выход                         ║
@@ -504,6 +505,18 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
 
 // Кэш для чтения файлов
 const fileCache = new Map();
+const FILE_CACHE_MAX_SIZE = 100;
+
+function clearFileCache() {
+    fileCache.clear();
+}
+
+function evictOldestFromCache() {
+    if (fileCache.size > FILE_CACHE_MAX_SIZE) {
+        const firstKey = fileCache.keys().next().value;
+        fileCache.delete(firstKey);
+    }
+}
 
 function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
     const result = [];
@@ -547,7 +560,8 @@ function readFilesRecursively(dir, maxFiles = 50, maxTotalSize = 500000) {
 
                             const content = fs.readFileSync(fullPath, 'utf8');
                             if (totalSize + content.length <= maxTotalSize) {
-                                fileCache.set(fullPath, content); // Кэшируем
+                                evictOldestFromCache();
+                                fileCache.set(fullPath, content);
                                 result.push({ path: fullPath, content });
                                 totalSize += content.length;
                             } else {
@@ -584,7 +598,8 @@ function getFileContent(filePath) {
     }
 
     const content = fs.readFileSync(absolutePath, 'utf8');
-    fileCache.set(absolutePath, content); // Кэшируем
+    evictOldestFromCache();
+    fileCache.set(absolutePath, content);
 
     return {
         path: absolutePath,
@@ -1346,6 +1361,11 @@ async function interactiveMode() {
                     conversationHistory = [];
                     saveChatHistory(conversationHistory);
                     console.log('🧹 История очищена\n');
+                    break;
+
+                case '/cache':
+                    clearFileCache();
+                    console.log('🗑️ Кэш файлов очищен\n');
                     break;
 
                 case '/model':
