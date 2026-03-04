@@ -1995,14 +1995,17 @@ async function interactiveMode() {
                     process.stdout.write('\r\u001b[K🤖 AI' + '.'.repeat(loadingDots));
                 }, 300);
 
-                for await (const chunk of chatStream(conversationHistory, currentModel)) {
+                try {
+                    for await (const chunk of chatStream(conversationHistory, currentModel)) {
+                        clearInterval(loadingInterval);
+                        process.stdout.write('\r\u001b[K🤖 AI > ');
+                        fullAnswer += chunk;
+                        process.stdout.write(chalk.green(chunk));
+                    }
+                } finally {
                     clearInterval(loadingInterval);
-                    process.stdout.write('\r\u001b[K🤖 AI > ');
-                    fullAnswer += chunk;
-                    process.stdout.write(chalk.green(chunk));
                 }
 
-                clearInterval(loadingInterval);
                 console.log('\n');
                 conversationHistory.push({ role: 'assistant', content: fullAnswer });
             } else {
@@ -2047,17 +2050,20 @@ async function singleMode(message, model) {
                 process.stdout.write('\r\u001b[K' + '.'.repeat(loadingDots));
             }, 300);
 
-            let firstChunk = true;
-            for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
-                if (firstChunk) {
-                    clearInterval(loadingInterval);
-                    process.stdout.write('\r\u001b[K');
-                    firstChunk = false;
+            try {
+                let firstChunk = true;
+                for await (const chunk of chatStream([{ role: 'user', content: message }], model)) {
+                    if (firstChunk) {
+                        clearInterval(loadingInterval);
+                        process.stdout.write('\r\u001b[K');
+                        firstChunk = false;
+                    }
+                    process.stdout.write(chalk.green(chunk));
                 }
-                process.stdout.write(chalk.green(chunk));
+            } finally {
+                clearInterval(loadingInterval);
             }
 
-            clearInterval(loadingInterval);
             console.log('\n');
         } else {
             console.log(chalk.cyan('\n🤖 GLM-' + model + ' печатает...\n'));
