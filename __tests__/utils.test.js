@@ -6,7 +6,8 @@ const {
     createProgressBar,
     validateMessages,
     countTokens,
-    truncateText
+    truncateText,
+    formatFileSize
 } = require('../lib/utils');
 const path = require('path');
 
@@ -368,5 +369,29 @@ describe('z.ai CLI - truncateText', () => {
 
     test('должен возвращать текст точно по границе', () => {
         expect(truncateText('Hello', 5)).toBe('Hello');
+    });
+});
+
+describe('z.ai CLI - formatFileSize', () => {
+    test('должен форматировать байты', () => {
+        expect(formatFileSize(0)).toBe('0 B');
+        expect(formatFileSize(100)).toBe('100 B');
+    });
+
+    test('должен форматировать килобайты', () => {
+        expect(formatFileSize(1024)).toBe('1 KB');
+        expect(formatFileSize(2048)).toBe('2 KB');
+    });
+
+    test('должен форматировать мегабайты', () => {
+        expect(formatFileSize(1048576)).toBe('1 MB');
+    });
+
+    test('должен форматировать гигабайты', () => {
+        expect(formatFileSize(1073741824)).toBe('1 GB');
+    });
+
+    test('должен округлять до одного знака', () => {
+        expect(formatFileSize(1536)).toBe('1.5 KB');
     });
 });
