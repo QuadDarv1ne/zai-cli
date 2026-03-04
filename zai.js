@@ -1982,7 +1982,6 @@ async function interactiveMode() {
         }
 
         conversationHistory.push({ role: 'user', content: input });
-        saveChatHistoryDebounced(conversationHistory);
 
         try {
             const useStreaming = userConfig.streaming !== false;
@@ -2006,16 +2005,16 @@ async function interactiveMode() {
                 clearInterval(loadingInterval);
                 console.log('\n');
                 conversationHistory.push({ role: 'assistant', content: fullAnswer });
-                saveChatHistoryDebounced(conversationHistory);
             } else {
                 process.stdout.write('🤖 AI > ');
                 const answer = await chat(conversationHistory, currentModel);
 
                 conversationHistory.push({ role: 'assistant', content: answer });
-                saveChatHistoryDebounced(conversationHistory);
 
                 console.log(highlightSyntax(answer) + '\n');
             }
+
+            saveChatHistoryDebounced(conversationHistory);
         } catch (error) {
             console.error(`\n❌ Ошибка: ${error.message}\n`);
             conversationHistory.pop();
