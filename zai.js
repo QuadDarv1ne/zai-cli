@@ -383,7 +383,23 @@ program.parse(process.argv);
 // CHAT ФУНКЦИЯ С РЕТРАЯМИ
 // ═══════════════════════════════════════════════════════════════════════
 
+function validateMessages(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+        throw new Error('Сообщения должны быть непустым массивом');
+    }
+    for (const msg of messages) {
+        if (!msg.role || !msg.content) {
+            throw new Error('Каждое сообщение должно иметь role и content');
+        }
+        if (!['system', 'user', 'assistant'].includes(msg.role)) {
+            throw new Error(`Недопустимая роль: ${msg.role}`);
+        }
+    }
+}
+
 async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = false) {
+    validateMessages(messages);
+
     const allMessages = systemPrompt
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
@@ -402,12 +418,17 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
     };
 
     const response = await fetchWithRetry(CONFIG.API_URL, options);
-    
+
     if (streaming) {
-        return response; // Возвращаем response для streaming
+        return response;
     }
-    
+
     const data = await response.json();
+
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Некорректный формат ответа API');
+    }
+
     return data.choices[0].message.content;
 }
 
@@ -416,6 +437,8 @@ async function chat(messages, model = 'glm-4', systemPrompt = null, streaming = 
 // ═══════════════════════════════════════════════════════════════════════
 
 async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
+    validateMessages(messages);
+
     const allMessages = systemPrompt
         ? [{ role: 'system', content: systemPrompt }, ...messages]
         : messages;
@@ -434,39 +457,44 @@ async function* chatStream(messages, model = 'glm-4', systemPrompt = null) {
     };
 
     const response = await fetchWithRetry(CONFIG.API_URL, options);
-    
+
     if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`API Error ${response.status}: ${errorText}`);
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) {break;}
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {break;}
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('data: ')) {
-                const data = trimmed.slice(6);
-                if (data === '[DONE]') {continue;}
-                try {
-                    const parsed = JSON.parse(data);
-                    const content = parsed.choices?.[0]?.delta?.content || '';
-                    if (content) {
-                        yield content;
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                    const data = trimmed.slice(6);
+                    if (data === '[DONE]') {continue;}
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content || '';
+                        if (content) {
+                            yield content;
+                        }
+                    } catch {
+                        // Пропускаем некорректные данные
                     }
-                } catch {
-                    // Пропускаем некорректные данные
                 }
             }
         }
+    } finally {
+        reader.releaseLock();
     }
 }
 
