@@ -3,7 +3,8 @@ const {
     extractFilesFromResponse,
     sleep,
     highlightSyntax,
-    createProgressBar
+    createProgressBar,
+    validateMessages
 } = require('../lib/utils');
 const path = require('path');
 
@@ -281,5 +282,43 @@ describe('z.ai CLI - Обработка ошибок', () => {
         expect(fs.existsSync(logFile)).toBe(true);
 
         fs.unlinkSync(logFile);
+    });
+});
+
+describe('z.ai CLI - validateMessages', () => {
+    test('должен принимать валидные сообщения', () => {
+        const messages = [
+            { role: 'user', content: 'Hello' },
+            { role: 'assistant', content: 'Hi there' }
+        ];
+        expect(() => validateMessages(messages)).not.toThrow();
+    });
+
+    test('должен отклонять пустой массив', () => {
+        expect(() => validateMessages([])).toThrow('непустым массивом');
+    });
+
+    test('должен отклонять не массив', () => {
+        expect(() => validateMessages('not array')).toThrow('непустым массивом');
+    });
+
+    test('должен отклонять сообщение без role', () => {
+        const messages = [{ content: 'Hello' }];
+        expect(() => validateMessages(messages)).toThrow('role и content');
+    });
+
+    test('должен отклонять сообщение без content', () => {
+        const messages = [{ role: 'user' }];
+        expect(() => validateMessages(messages)).toThrow('role и content');
+    });
+
+    test('должен отклонять недопустимую роль', () => {
+        const messages = [{ role: 'invalid', content: 'Hello' }];
+        expect(() => validateMessages(messages)).toThrow('Недопустимая роль');
+    });
+
+    test('должен принимать роль system', () => {
+        const messages = [{ role: 'system', content: 'You are helpful' }];
+        expect(() => validateMessages(messages)).not.toThrow();
     });
 });
