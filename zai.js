@@ -27,6 +27,11 @@ function generateRequestId() {
     return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function addJitter(delay, factor = 0.2) {
+    const jitter = delay * factor * (Math.random() * 2 - 1);
+    return delay + jitter;
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // ЗАГРУЗКА .ENV
 // ═══════════════════════════════════════════════════════════════════════
@@ -201,9 +206,10 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
             }
 
             if (attempt < retries) {
-                const delay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1);
+                const baseDelay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1);
+                const delay = addJitter(baseDelay);
                 console.log(`\n⚠️ Ошибка: ${error.message}`);
-                console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${delay / 1000}с...\n`);
+                console.log(`🔄 Попытка ${attempt + 1} из ${retries} через ${(delay / 1000).toFixed(1)}с...\n`);
                 await sleep(delay);
             }
         }
